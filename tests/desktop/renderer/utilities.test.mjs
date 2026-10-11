@@ -122,3 +122,55 @@ test("Clear Cache cancel avoids reads while an attempted clear invalidates them"
   assert.equal(calls.clears, 1);
   assert.equal(calls.cancellations, 1);
 });
+
+test("confirmClear sends nothing unless a clear was asked for and is still waiting", async () => {
+  const controller = new WorkspaceUtilityController();
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { calls, value } = context({
+    bridge: {
+      copyReviewUrl: async () => ({ outcome: "failed", message: "unused" }),
+      clearCache: async () => {
+        calls.clears += 1;
+        await gate;
+        return { outcome: "cleared", message: "Shared API cache cleared." };
+      },
+    },
+  });
+
+  // Nothing asked to clear, so there is nothing to confirm.
+  await controller.confirmClear(value);
+  assert.deepEqual(
+    { clears: calls.clears, cancellations: calls.cancellations, state: controller.state },
+    { clears: 0, cancellations: 0, state: { kind: "idle" } },
+  );
+
+  // A cancelled request leaves nothing to confirm either.
+  controller.beginClear();
+  controller.cancel();
+  await controller.confirmClear(value);
+  assert.equal(calls.clears, 0);
+  assert.deepEqual(controller.state, { kind: "idle" });
+
+  // A confirmation repeated while the clear runs sends one request.
+  controller.beginClear();
+  const running = controller.confirmClear(value);
+  await controller.confirmClear(value);
+  assert.deepEqual(controller.state, { kind: "clearing" });
+  release();
+  await running;
+  assert.equal(calls.clears, 1);
+  assert.equal(calls.cancellations, 1);
+  assert.deepEqual(controller.state, {
+    kind: "notice",
+    severity: "status",
+    message: "Shared API cache cleared.",
+  });
+
+  // The notice it left is not a request to clear again.
+  await controller.confirmClear(value);
+  assert.equal(calls.clears, 1);
+  assert.equal(calls.cancellations, 1);
+});
