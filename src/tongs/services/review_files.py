@@ -444,10 +444,16 @@ class ReviewFileService:
         return merge_base
 
     def clear(self) -> None:
-        """Forget every file, generated diff and merge base kept in memory."""
+        """Forget every file, generated diff and merge base kept in memory.
+
+        Running generations are forgotten too: one that finished just before
+        the clear may not have left ``_running`` yet, and must not be reused.
+        A generation still in its thread finishes for the callers waiting.
+        """
         self._memory.clear()
         self._generated.clear()
         self._merge_bases.clear()
+        self._running.clear()
 
     def close(self) -> None:
         """Release the in-memory caches when the session closes."""

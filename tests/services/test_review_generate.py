@@ -553,6 +553,25 @@ class TestCaching:
         assert len(client.merge_base_calls) == 2
 
     @pytest.mark.asyncio
+    async def test_clear_forgets_a_finished_generation_not_yet_released(self) -> None:
+        client = both_sides()
+        service = service_for(client)
+        task = asyncio.create_task(
+            service.generate_file_diff(REVIEW, REVISION, truncated())
+        )
+        # Catch the generation while it is registered as running.
+        while not service._running:
+            await asyncio.sleep(0)
+        key, running = next(iter(service._running.items()))
+        await task
+        # Its done callback can run after the caller returns on some loops.
+        service._running[key] = running
+        service.clear()
+        await service.generate_file_diff(REVIEW, REVISION, truncated())
+        assert len(client.reads) == 4
+        assert len(client.merge_base_calls) == 2
+
+    @pytest.mark.asyncio
     async def test_cancellation_mid_download_keeps_nothing(self) -> None:
         client = both_sides()
         client.block = asyncio.Event()
