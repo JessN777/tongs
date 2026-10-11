@@ -268,6 +268,39 @@ async def test_github_inline_content_uses_one_native_revision_bound_batch(
 
 
 @pytest.mark.asyncio
+async def test_completed_and_reconciled_submissions_leave_no_lock_files(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "drafts.db"
+    lock_dir = tmp_path / "drafts.db.locks"
+    store, service, _, _, draft = await _services(
+        path, _content(GeneralDraftComment(uuid4(), "comment"))
+    )
+
+    progress = await service.start(draft.id, draft.version)
+
+    assert progress.outcome is SubmissionOutcome.SUBMITTED
+    assert list(lock_dir.iterdir()) == []
+    await store.close()
+
+    add = AsyncMock(side_effect=NetworkError("timeout"))
+    store, service, _, _, draft = await _services(
+        path,
+        _content(GeneralDraftComment(uuid4(), "comment")),
+        client=_client(add_comment=add),
+    )
+    unknown = await service.start(draft.id, draft.version)
+    assert unknown.outcome is SubmissionOutcome.UNKNOWN
+    submitted = await service.reconcile(
+        unknown.attempt_id, ReconciliationResolution.MARK_SUBMITTED
+    )
+
+    assert submitted.outcome is SubmissionOutcome.SUBMITTED
+    assert list(lock_dir.iterdir()) == []
+    await store.close()
+
+
+@pytest.mark.asyncio
 async def test_github_mixed_content_preserves_order_then_one_final_review(
     tmp_path: Path,
 ) -> None:
