@@ -347,6 +347,19 @@ class TestDiscoverSymlinks:
         repos = discover_repos(tmp_path)
         assert [repo.display_name for repo in repos] == ["org/outer"]
 
+    def test_link_inside_a_repository_working_tree_is_not_followed(self, tmp_path):
+        # The linked repository lies outside both root and the outer checkout,
+        # so only the rule that a checkout's working tree is never walked keeps
+        # it out; the nested-repository check cannot catch it.
+        elsewhere = tmp_path / "elsewhere" / "other"
+        _init_repo(elsewhere, {"origin": "https://github.com/org/other.git"})
+        root = tmp_path / "root"
+        outer = root / "outer"
+        _init_repo(outer, {"origin": "https://github.com/org/outer.git"})
+        (outer / "linked").symlink_to(elsewhere)
+        repos = discover_repos(root)
+        assert [repo.display_name for repo in repos] == ["org/outer"]
+
     def test_unreadable_link_target_is_skipped(self, tmp_path):
         _init_repo(tmp_path / "good", {"origin": "https://github.com/org/good.git"})
         blocked = tmp_path / "elsewhere" / "blocked"

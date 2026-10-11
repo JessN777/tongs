@@ -93,6 +93,33 @@ def test_bundle_root_outside_package_is_rejected_without_asset_check(
         )
 
 
+def test_bundle_root_link_is_rejected_for_a_bundle_without_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With no assets, no per-asset check runs, so only the bundle root's own
+    # containment check stands between the package and the outside folder.
+    package = make_package(tmp_path, "empty_bundle_link_fixture")
+    outside = tmp_path / "empty_bundle_outside"
+    outside.mkdir()
+    (package / "extra").symlink_to(outside, target_is_directory=True)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    base = resource_manifest("empty_bundle_link_fixture")
+    manifest = DesktopPluginManifest(
+        plugin_id=base.plugin_id,
+        title=base.title,
+        version=base.version,
+        compatibility=base.compatibility,
+        modules=base.modules,
+        asset_bundles=(
+            *base.asset_bundles,
+            DesktopAssetBundle("extra", "empty_bundle_link_fixture", "extra", ()),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="symlink"):
+        validate_asset_resources(manifest)
+
+
 def test_bundle_root_symlinked_ancestor_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
