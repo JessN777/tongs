@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,8 +11,10 @@ import {
   DESKTOP_SETTINGS_FILE,
   DesktopSettingsStore,
   MAX_DESKTOP_SETTINGS_BYTES,
+  TransientSettingsStore,
   WINDOW_BACKGROUND,
   assertColorSchemeChoice,
+  colorSchemeStoreFor,
   parseSavedColorScheme,
   windowBackground,
 } from "../../../desktop/dist/src/main/appearance.js";
@@ -287,6 +290,110 @@ test("a failed save changes nothing and names no path", async (context) => {
   assert.equal(controller.current.effective, "system");
   assert.equal(controller.current.revision, 0);
   assert.deepEqual(theme.sources, []);
+});
+
+/** A user data folder whose settings file already holds a saved choice. */
+async function userDataWithSavedChoice(context, choice) {
+  const root = await scratch(context);
+  const userData = path.join(root, "user-data");
+  const file = path.join(userData, DESKTOP_SETTINGS_FILE);
+  await mkdir(userData, { recursive: true });
+  const text = `${JSON.stringify({ color_scheme: choice })}\n`;
+  await writeFile(file, text);
+  return { userData, file, text };
+}
+
+test("a normal run applies the saved choice from the user data folder", async (context) => {
+  const { userData, file } = await userDataWithSavedChoice(context, "dark");
+  const store = colorSchemeStoreFor(userData, false);
+  assert.equal(store instanceof DesktopSettingsStore, true);
+  assert.equal(store.file, file);
+  const theme = fakeTheme(false);
+  const controller = new AppearanceController(store, theme);
+  const appearance = await controller.load();
+  controller.setConfigured("light");
+  assert.equal(appearance.saved, "dark");
+  assert.equal(controller.current.effective, "dark");
+  assert.equal(theme.current, "dark");
+});
+
+for (const [saved, configured] of [
+  ["dark", "light"],
+  ["light", "dark"],
+  ["dark", "system"],
+]) {
+  test(`a smoke run ignores a saved ${saved} choice and follows the configured ${configured}`, async (context) => {
+    const { userData, file, text } = await userDataWithSavedChoice(context, saved);
+    const store = colorSchemeStoreFor(userData, true);
+    assert.equal(store instanceof TransientSettingsStore, true);
+    const theme = fakeTheme();
+    const controller = new AppearanceController(store, theme);
+    const loaded = await controller.load();
+    assert.deepEqual({ ...loaded }, {
+      configured: "system",
+      saved: null,
+      effective: "system",
+      revision: 0,
+    });
+    assert.equal(theme.current, "system");
+    assert.deepEqual(theme.sources, []);
+
+    controller.setConfigured(configured);
+    assert.equal(controller.current.saved, null);
+    assert.equal(controller.current.effective, configured);
+    assert.equal(theme.current, configured);
+    assert.equal(await readFile(file, "utf8"), text);
+  });
+}
+
+test("a smoke run keeps a toggle choice in memory and leaves the saved file alone", async (context) => {
+  const { userData, file, text } = await userDataWithSavedChoice(context, "dark");
+  const theme = fakeTheme();
+  const controller = new AppearanceController(colorSchemeStoreFor(userData, true), theme);
+  await controller.load();
+  controller.setConfigured("dark");
+
+  const chosen = await controller.choose("light");
+  assert.equal(chosen.saved, "light");
+  assert.equal(chosen.effective, "light");
+  assert.equal(theme.current, "light");
+  const cleared = await controller.choose("system");
+  assert.equal(cleared.saved, null);
+  assert.equal(cleared.effective, "dark");
+  assert.equal(await readFile(file, "utf8"), text);
+});
+
+test("a smoke run with no user data folder writes nothing there", async (context) => {
+  const root = await scratch(context);
+  const userData = path.join(root, "user-data");
+  const controller = new AppearanceController(colorSchemeStoreFor(userData, true), fakeTheme());
+  await controller.load();
+  await controller.choose("dark");
+  await assert.rejects(stat(userData), { code: "ENOENT" });
+});
+
+test("the transient store starts empty and keeps only the last choice", async () => {
+  const store = new TransientSettingsStore();
+  assert.equal(await store.readColorScheme(), null);
+  await store.writeColorScheme("light");
+  assert.equal(await store.readColorScheme(), "light");
+  await store.writeColorScheme(null);
+  assert.equal(await store.readColorScheme(), null);
+});
+
+test("the production entry point picks the smoke store from the smoke report flag", () => {
+  const entry = readFileSync(
+    new URL("../../../desktop/src/main/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.equal(entry.split("colorSchemeStoreFor(").length - 1, 1);
+  assert.equal(
+    entry.includes('colorSchemeStoreFor(app.getPath("userData"), Boolean(smokePath))'),
+    true,
+  );
+  assert.match(entry, /const smokePath = argumentValue\(process\.argv, "--tongs-smoke-report"\);/);
+  assert.match(entry, /if \(smokePath\) await captureSmokeReport\(smokePath\);/);
+  assert.equal(entry.includes("new DesktopSettingsStore("), false);
 });
 
 test("the window background matches the stylesheet in each scheme", () => {
