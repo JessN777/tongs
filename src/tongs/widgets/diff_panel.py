@@ -801,6 +801,12 @@ class DiffContent(Widget):
     MIN_SPLIT_WIDTH = 88
     HIGHLIGHT_CACHE_FILES = 16
     """Highlighted files kept for revisits; the least recently shown goes."""
+    CONTEXT_CACHE_FILES = 16
+    """Read files kept for expanding context; the least recently used goes.
+
+    A file that goes loses its open gaps and whole-file colours with its
+    lines, so it reads as before its first expansion.
+    """
 
     DEFAULT_CSS = """
     DiffContent {
@@ -829,13 +835,17 @@ class DiffContent(Widget):
             OrderedDict()
         )
         # Per-file expand-in-place state by id(file), holding the file so a
-        # reused id misses: the new file's lines once read, which gaps are
-        # open, and a read in flight with the gap that asked for it.
-        self._context_models: dict[int, tuple[DiffFile, FileContextModel]] = {}
+        # reused id misses: the new file's lines once read (least recently
+        # used first), which gaps are open, and a read in flight with the gap
+        # that asked for it.
+        self._context_models: OrderedDict[int, tuple[DiffFile, FileContextModel]] = (
+            OrderedDict()
+        )
         self._expansions: dict[int, tuple[DiffFile, FileExpansion]] = {}
         self._context_pending: dict[int, tuple[DiffFile, int | None]] = {}
         # Per-file highlight maps with the whole-file colours of expanded
-        # lines merged over the per-hunk ones, once the lexer has run.
+        # lines merged over the per-hunk ones, once the lexer has run. Only a
+        # file with lines in ``_context_models`` has one.
         self._context_highlights: dict[int, tuple[DiffFile, HighlightMap]] = {}
         # Local generation state of truncated files by id(file), holding the
         # file so a reused id misses: None while it runs, otherwise the line
@@ -1016,13 +1026,26 @@ class DiffContent(Widget):
         lengths at once and open with no further read.
         """
         model = FileContextModel(file, lines, ends_with_newline)
-        self._context_models[id(file)] = (file, model)
+        self._store_context_model(file, model)
         self._highlight_context(file, model)
 
     def context_model(self, file: DiffFile) -> FileContextModel | None:
         """Return the file's read lines, when they have been loaded."""
         entry = self._context_models.get(id(file))
-        return entry[1] if entry is not None and entry[0] is file else None
+        if entry is None or entry[0] is not file:
+            return None
+        self._context_models.move_to_end(id(file))
+        return entry[1]
+
+    def _store_context_model(self, file: DiffFile, model: FileContextModel) -> None:
+        """Keep a file's read lines, letting the least recently used file go."""
+        self._context_models[id(file)] = (file, model)
+        self._context_models.move_to_end(id(file))
+        while len(self._context_models) > self.CONTEXT_CACHE_FILES:
+            key, _entry = self._context_models.popitem(last=False)
+            # Without its lines a file shows no open gap, so it drops them too.
+            self._expansions.pop(key, None)
+            self._context_highlights.pop(key, None)
 
     def file_expansion(self, file: DiffFile) -> FileExpansion:
         """Return which of the file's gaps are open."""
@@ -1237,7 +1260,7 @@ class DiffContent(Widget):
         """
         self._context_pending.pop(id(file), None)
         model = FileContextModel(file, lines, ends_with_newline)
-        self._context_models[id(file)] = (file, model)
+        self._store_context_model(file, model)
         self._highlight_context(file, model)
         if gap_index is None:
             self._rerender_if_current(file)

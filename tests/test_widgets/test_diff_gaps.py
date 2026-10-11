@@ -20,11 +20,12 @@ from tongs.widgets.diff_panel import (
     READ_ONLY_LINE_MESSAGE,
     CommentRequested,
     ContextRequested,
+    DiffContent,
     DiffOptionList,
     DiffPanel,
 )
 from tongs.widgets.review_draft import DraftMarker
-from tongs.widgets.split_diff import DiffViewMode, SplitDiffView
+from tongs.widgets.split_diff import DiffViewMode, HighlightMap, SplitDiffView
 
 NOW = datetime(2026, 10, 10, tzinfo=UTC)
 
@@ -380,6 +381,36 @@ async def test_expansion_survives_redraws_and_file_switches() -> None:
         await pilot.pause()
         assert "  14   14    line 14" in _rows(app)
         assert len(app.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_read_files_are_kept_for_the_most_recently_used_few() -> None:
+    app = _GapApp()
+    async with app.run_test(size=(100, 60), notifications=True) as pilot:
+        limit = DiffContent.CONTEXT_CACHE_FILES
+        files = [_file(path=f"f{index}.txt") for index in range(limit + 1)]
+        panel = await _open(app, pilot, *files)
+        content = app.query_one(DiffContent)
+        for file in files[:limit]:
+            panel.apply_file_context(file, NEW_LINES, NEW_EOL, 1)
+        # Use the oldest again so the second file becomes the least recent.
+        assert content.context_model(files[0]) is not None
+        stale = HighlightMap()
+        content._context_highlights[id(files[1])] = (files[1], stale)
+        panel.apply_file_context(files[limit], NEW_LINES, NEW_EOL, 1)
+        await pilot.pause()
+
+        assert len(content._context_models) == limit
+        assert content.context_model(files[1]) is None
+        # The file reads as before its first expansion: no open gap and no
+        # whole-file colours outlive its lines.
+        assert not content.file_expansion(files[1]).is_shown(1)
+        assert id(files[1]) not in content._context_highlights
+        for file in (files[0], *files[2:]):
+            assert content.context_model(file) is not None
+            assert content.file_expansion(file).is_shown(1)
+        # The first file on screen still shows its expanded lines.
+        assert "  14   14    line 14" in _rows(app)
 
 
 @pytest.mark.asyncio
