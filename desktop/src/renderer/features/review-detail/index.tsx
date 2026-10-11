@@ -344,7 +344,7 @@ function Overview({
 }): ReactNode {
   const facts = [
     ["State", snapshot.detail.state],
-    ["Merge", snapshot.detail.merge_status],
+    ["Merge", snapshot.detail.merge_status ?? "Not reported"],
     ["CI", snapshot.detail.ci_status],
     ["Updated", formatDate(snapshot.detail.updated_at)],
     [

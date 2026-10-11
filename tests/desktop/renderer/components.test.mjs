@@ -591,6 +591,31 @@ test("overview renders its real description through restricted Markdown", async 
   await waitFor(() => assert.deepEqual(opened, ["https://example.com/docs"]));
 });
 
+test("overview shows a merge status the forge did not report as not reported", async () => {
+  const bridge = baseBridge({
+    getReview: () =>
+      read({
+        ...reviewSnapshot(),
+        detail: { ...reviewSnapshot().detail, merge_status: null },
+      }),
+  });
+  const overview = createReviewOverviewFeature();
+  const view = render(
+    overview.render(featureContext(bridge), {
+      kind: "review",
+      item: reviewItem(),
+      panel: "overview",
+    }),
+  );
+
+  await view.findByText("Review status");
+  const facts = [...view.container.querySelectorAll(".fact")].map(
+    (fact) => fact.textContent,
+  );
+  assert.equal(facts.includes("MergeNot reported"), true);
+  assert.equal(view.container.textContent.includes("null"), false);
+});
+
 function featureContext(bridge, navigate = () => {}) {
   return {
     bridge,

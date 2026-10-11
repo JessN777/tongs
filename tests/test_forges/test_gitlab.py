@@ -1179,3 +1179,72 @@ async def test_get_mr_diff_stops_paging_at_gitlab_largest_diff() -> None:
 
     assert pages == [str(page) for page in range(1, 31)]
     assert len(changes) == 3000
+
+
+class TestAbsentOptionalText:
+    """A forge's explicit null for an optional text keeps the empty string (#184).
+
+    The core models type these fields as text and spell "not provided" as the
+    empty string, so a null in the payload must not leak in as ``None``.
+    """
+
+    def test_job_and_pipeline_without_optional_text(self) -> None:
+        client, _ = _make_gitlab_client(lambda _: httpx.Response(200))
+
+        job = client._parse_job(
+            {
+                "id": 5001,
+                "name": "unit-tests",
+                "stage": None,
+                "status": "failed",
+                "web_url": None,
+            }
+        )
+        pipeline = client._parse_pipeline(
+            {
+                "id": 9001,
+                "status": "success",
+                "ref": "main",
+                "sha": "abc123",
+                "web_url": None,
+                "source": None,
+            }
+        )
+
+        assert (job.name, job.stage, job.web_url) == ("unit-tests", "", "")
+        assert (pipeline.web_url, pipeline.source) == ("", "")
+
+    def test_detail_without_merge_status(self) -> None:
+        client, _ = _make_gitlab_client(lambda _: httpx.Response(200))
+
+        detail = client._parse_mr_detail(
+            _mr_api_json({"merge_status": None}), "acme/widgets"
+        )
+
+        assert detail.merge_status == ""
+
+    @pytest.mark.asyncio
+    async def test_commit_without_link(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path.endswith("/merge_requests/42/commits")
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "abc123def456",
+                        "short_id": "abc123de",
+                        "title": "Fix the build",
+                        "message": "Fix the build",
+                        "author_name": "Dev",
+                        "web_url": None,
+                    }
+                ],
+            )
+
+        client, http = _make_gitlab_client(handler)
+        async with http:
+            commits = await client.list_mr_commits("acme/widgets", 42)
+
+        assert [(commit.short_sha, commit.web_url) for commit in commits] == [
+            ("abc123de", "")
+        ]

@@ -452,7 +452,7 @@ class GitLabClient(ForgeClient):
                     display_name=c.get("author_name", ""),
                 ),
                 created_at=_parse_datetime(c.get("created_at")),
-                web_url=c.get("web_url", ""),
+                web_url=c.get("web_url") or "",
             )
             for c in data
         ]
@@ -911,7 +911,7 @@ class GitLabClient(ForgeClient):
         return MRDetail(
             **{f.name: getattr(summary, f.name) for f in fields(summary)},
             description=data.get("description", "") or "",
-            merge_status=data.get("merge_status", ""),
+            merge_status=data.get("merge_status") or "",
             approvals=tuple(approvals),
             reviewers=tuple(reviewers),
             assignees=tuple(assignees),
@@ -942,8 +942,8 @@ class GitLabClient(ForgeClient):
             status=_parse_ci_status(data.get("status")),
             ref=data.get("ref", ""),
             sha=data.get("sha", ""),
-            web_url=data.get("web_url", ""),
-            source=data.get("source", ""),
+            web_url=data.get("web_url") or "",
+            source=data.get("source") or "",
             created_at=_parse_datetime(data.get("created_at")),
             finished_at=_parse_datetime(data.get("finished_at")),
             duration_seconds=data.get("duration"),
@@ -953,9 +953,9 @@ class GitLabClient(ForgeClient):
         return PipelineJob(
             id=data["id"],
             name=data.get("name", ""),
-            stage=data.get("stage", ""),
+            stage=data.get("stage") or "",
             status=_parse_ci_status(data.get("status")),
-            web_url=data.get("web_url", ""),
+            web_url=data.get("web_url") or "",
             started_at=_parse_datetime(data.get("started_at")),
             finished_at=_parse_datetime(data.get("finished_at")),
             duration_seconds=data.get("duration"),

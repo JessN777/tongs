@@ -853,7 +853,7 @@ class GitHubClient(ForgeClient):
                 created_at=_parse_datetime(
                     c.get("commit", {}).get("author", {}).get("date")
                 ),
-                web_url=c.get("html_url", ""),
+                web_url=c.get("html_url") or "",
             )
             for c in data
         ]
@@ -1716,7 +1716,7 @@ class GitHubClient(ForgeClient):
         return MRDetail(
             **{f.name: getattr(summary, f.name) for f in fields(summary)},
             description=data.get("body", "") or "",
-            merge_status=data.get("mergeable_state", ""),
+            merge_status=data.get("mergeable_state") or "",
             reviewers=tuple(requested_reviewers),
             assignees=tuple(assignees),
             changes_count=data.get("changed_files", 0),
@@ -1755,8 +1755,8 @@ class GitHubClient(ForgeClient):
             status=_parse_ci_status(data.get("status"), data.get("conclusion")),
             ref=data.get("head_branch", ""),
             sha=data.get("head_sha", ""),
-            web_url=data.get("html_url", ""),
-            source=data.get("event", ""),
+            web_url=data.get("html_url") or "",
+            source=data.get("event") or "",
             created_at=_parse_datetime(data.get("created_at")),
             finished_at=_parse_datetime(data.get("updated_at")),
             duration_seconds=data.get("run_duration_ms", 0) // 1000
@@ -1768,9 +1768,9 @@ class GitHubClient(ForgeClient):
         return PipelineJob(
             id=data["id"],
             name=data.get("name", ""),
-            stage=data.get("workflow_name", ""),
+            stage=data.get("workflow_name") or "",
             status=_parse_ci_status(data.get("status"), data.get("conclusion")),
-            web_url=data.get("html_url", ""),
+            web_url=data.get("html_url") or "",
             started_at=_parse_datetime(data.get("started_at")),
             finished_at=_parse_datetime(data.get("completed_at")),
         )
