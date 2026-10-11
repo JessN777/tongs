@@ -782,8 +782,13 @@ function LogViewer({ loaded }: { readonly loaded: LoadedLog }): ReactNode {
   );
   useEffect(() => setSelectedMatch(0), [query]);
   // A refresh replaces the log the search was filtering, so it ends the search
-  // outright and puts the row window back where the search started.
+  // outright and puts the row window back where the search started. Only a
+  // new snapshot does this: run on mount, the reset could land after the
+  // first keystroke and drop it.
+  const shownSnapshot = useRef(loaded.snapshotId);
   useEffect(() => {
+    if (shownSnapshot.current === loaded.snapshotId) return;
+    shownSnapshot.current = loaded.snapshotId;
     const opened = openedFrom.current;
     openedFrom.current = null;
     setQuery("");
