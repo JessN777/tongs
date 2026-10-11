@@ -29,6 +29,8 @@ def add_worktree(main_dir: Path, worktree_dir: Path) -> None:
             "user.name=tongs",
             "-c",
             "user.email=tongs@example.com",
+            "-c",
+            "commit.gpgsign=false",
             "commit",
             "-q",
             "--allow-empty",

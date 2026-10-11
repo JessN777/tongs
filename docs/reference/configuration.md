@@ -95,8 +95,9 @@ What the scan finds:
   are skipped.
 - A repository inside another repository's working tree, such as a submodule,
   is skipped.
-- The terminal repo list shows each project once. When a main checkout and its
-  worktrees share a project, the row opens the main checkout.
+- The terminal repo list shows each project once, even when several checkouts
+  of it are found, such as a main checkout and its worktrees or two clones.
+  The row opens a main checkout over a worktree.
 
 ## `[editor]`
 
