@@ -224,6 +224,14 @@ _MAX_REVIEW_HEADS = 8192
 # The longest rate-limit wait ``reviews.ci_status`` names, in seconds.
 _MAX_RATE_LIMIT_WAIT_SECONDS = 86_400
 _DEFAULT_SHUTDOWN_TIMEOUT = 5.0
+# The waits a final session close makes in turn, each bounded by the session's
+# shutdown timeout: a startup still running, the four mutation services (review
+# submissions, MR actions, CI mutations and review mutations), the draft store,
+# the forge registry and the cache. The sidecar bounds the whole close by this
+# many timeouts, so it never cancels a close that keeps to its own bounds and
+# leaves a store's SQLite worker thread running, which would keep the process
+# alive after it should have exited (#442).
+_FINAL_CLOSE_WAITS = 8
 
 
 class AsyncByteWriter(Protocol):
@@ -238,7 +246,7 @@ class SessionResource(Protocol):
 
     async def start(self) -> object: ...
 
-    async def close(self) -> None: ...
+    async def close(self, *, final: bool = False) -> None: ...
 
 
 @dataclass(slots=True)
@@ -415,7 +423,10 @@ class DesktopSidecarServer:
     ) -> None:
         if shutdown_timeout <= 0:
             raise ValueError("shutdown_timeout must be positive")
-        self._session = session or ApplicationSession()
+        # The session's own close waits use the same timeout, so the bound on
+        # the whole close below covers them. A session passed in is expected
+        # to use a timeout no longer than this one.
+        self._session = session or ApplicationSession(shutdown_timeout=shutdown_timeout)
         self._plugin_registry = plugin_registry
         self._core_assets = core_assets
         self._shutdown_timeout = shutdown_timeout
@@ -1841,7 +1852,13 @@ class DesktopSidecarServer:
         registry = self._plugin_registry
         if registry is not None:
             await _bounded_cleanup(registry.stop_all(), self._shutdown_timeout)
-        await _bounded_cleanup(self._session.close(), self._shutdown_timeout)
+        # The process exits next and no later close will retry, so this is the
+        # final close: after a failed review submission cleanup it still closes
+        # the draft store, the registry and the cache.
+        await _bounded_cleanup(
+            self._session.close(final=True),
+            _FINAL_CLOSE_WAITS * self._shutdown_timeout,
+        )
         if self._editor_exports is not None:
             await _bounded_cleanup(self._editor_exports.close(), self._shutdown_timeout)
         self._snapshots.clear()

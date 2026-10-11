@@ -153,7 +153,7 @@ class _FixtureSession:
     async def start(self) -> _FixtureSession:
         return self
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         await self.ci_mutations.close()
         self._events.put_nowait(None)
 

@@ -114,6 +114,7 @@ class _FakeSession:
         self.config = Config()
         self.started = False
         self.closed = False
+        self.final_close = False
         self.read_started = asyncio.Event()
         self.read_cancelled = asyncio.Event()
         self.release_read = asyncio.Event()
@@ -123,8 +124,9 @@ class _FakeSession:
         self.started = True
         return self
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         self.closed = True
+        self.final_close = final
 
     async def events(self) -> AsyncIterator[ServiceEvent]:
         await asyncio.Future()
@@ -352,6 +354,8 @@ async def test_read_cancellation_and_shutdown_drain_pending_request() -> None:
     assert (await writer.frames.get())["result"] == {"accepted": True}
     await task
     assert session.closed
+    # The process exits next, so the session closes for good (#442).
+    assert session.final_close
     assert not server._pending
 
 
@@ -387,6 +391,8 @@ async def test_eof_cancels_pending_read_and_closes_session() -> None:
     assert cancelled["error"]["code"] == "request_cancelled"  # type: ignore[index]
     await task
     assert session.closed
+    # The process exits next, so the session closes for good (#442).
+    assert session.final_close
     assert not server._pending
 
 

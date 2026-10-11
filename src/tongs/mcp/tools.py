@@ -100,11 +100,17 @@ class SessionHolder:
             return self._session
 
     async def close(self) -> None:
-        """Close the session, if one was started."""
+        """Close the session, if one was started, as the process exits.
+
+        This is the session's final close: no later close will retry, so the
+        draft store, the registry and the cache close even after a failed
+        review submission cleanup. Left open, their SQLite worker threads
+        would keep the process alive after the server stops (#442).
+        """
         async with self._lock:
             session, self._session = self._session, None
         if session is not None:
-            await session.close()
+            await session.close(final=True)
 
 
 async def open_session(holder: SessionHolder, operation: str) -> ApplicationSession:
