@@ -262,6 +262,11 @@ def test_redownload_discards_an_unrecoverable_interrupted_activation(
         )
         == 2
     )
+    # The plain repair fails because local recovery rejects the corrupted
+    # candidate, not for an unrelated reason.
+    assert "The installed desktop payload is incomplete or changed." in (
+        errors.getvalue()
+    )
     assert context.store.paths.journal_path.exists()
 
     output = io.StringIO()
@@ -271,7 +276,7 @@ def test_redownload_discards_an_unrecoverable_interrupted_activation(
             console_argv0="tongs",
             context=context,
             stdout=output,
-            stderr=errors,
+            stderr=io.StringIO(),
         )
         == 0
     )
