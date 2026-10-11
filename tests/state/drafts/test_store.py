@@ -10,6 +10,7 @@ import os
 import sqlite3
 import stat
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -827,6 +828,12 @@ async def test_final_attempt_states_leave_no_lock_files(db_path: Path) -> None:
     await store.close()
 
 
+def _age(path: Path) -> None:
+    """Make a lock file look like a leftover from a crashed process."""
+    old = time.time() - 3600
+    os.utime(path, (old, old), follow_symlinks=False)
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX lock file policy")
 async def test_open_removes_only_stale_lock_files_it_can_lock(db_path: Path) -> None:
@@ -837,6 +844,10 @@ async def test_open_removes_only_stale_lock_files_it_can_lock(db_path: Path) -> 
     lock_dir.mkdir(mode=0o700)
     stale = lock_dir / f"{uuid4()}.lock"
     stale.touch(mode=0o600)
+    _age(stale)
+    # A fresh unheld file may be a submission about to lock it.
+    fresh = lock_dir / f"{uuid4()}.lock"
+    fresh.touch(mode=0o600)
     live = AttemptLock.try_acquire(lock_dir, str(uuid4()))
     assert live is not None
     shared = lock_dir / f"{uuid4()}.lock"
@@ -849,11 +860,15 @@ async def test_open_removes_only_stale_lock_files_it_can_lock(db_path: Path) -> 
     target.chmod(0o600)
     linked = lock_dir / f"{uuid4()}.lock"
     linked.symlink_to(target)
+    # Old enough to be candidates, so the other guards decide.
+    for path in (live.path, shared, unrelated, linked):
+        _age(path)
 
     store = DraftStore(db_path)
     await store.open()
 
     assert not stale.exists()
+    assert fresh.exists()
     # A lock another owner holds keeps its file and its ownership.
     assert live.path.exists()
     assert AttemptLock.try_acquire(lock_dir, live.path.stem) is None

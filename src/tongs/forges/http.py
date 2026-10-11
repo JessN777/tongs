@@ -652,7 +652,8 @@ async def request_log_tail(
             encoding = response.charset_encoding or "utf-8"
     except httpx.TimeoutException as e:
         raise NetworkError(f"Request timed out: {redact_credentials(str(e))}") from e
-    except httpx.TransportError as e:
+    except httpx.RequestError as e:
+        # Also a body that fails to decode partway through the stream.
         raise NetworkError(f"Transport error: {redact_credentials(str(e))}") from e
     return JobLogTail.from_bytes(bytes(tail), total, max_bytes, encoding)
 

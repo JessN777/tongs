@@ -48,11 +48,11 @@ const EDITOR_EXPORT_ROOT_ENV = "TONGS_DESKTOP_EDITOR_EXPORT_ROOT";
  * gives pending requests up to 5 s to stop and plugins up to 2 s to clean up,
  * then closes its session for good. When a review submission does not stop,
  * that close spends up to 2 s on the submission service's own two 1 s waits
- * and up to 5 s letting a running draft store write finish; the other
- * services, the registry and the cache have nothing left to wait for. The
- * stores so close cleanly within 14 s, and 15 s covers that. A service still
- * running by then is stuck: killing it rolls back any unfinished SQLite
- * write, and the next start recovers an interrupted submission.
+ * and up to 5 s letting a running draft store write finish. With one stuck
+ * submission the stores close within about 14 s, and 15 s covers that case.
+ * Several slow closes at once can take longer; the signals are then the safe
+ * fallback: killing the service rolls back any unfinished SQLite write, and
+ * the next start recovers an interrupted submission.
  */
 const SIDECAR_EXIT_TIMEOUT_MS = 15_000;
 /** The service writes its `shutdown` reply before it starts to close. */

@@ -234,3 +234,17 @@ def test_a_cut_on_a_line_start_keeps_that_line() -> None:
     tail = JobLogTail.from_bytes(data, len(data), 10)
 
     assert tail == JobLogTail("bbbb\ncccc\n", 15, True)
+
+
+@pytest.mark.asyncio
+async def test_a_body_that_fails_to_decode_is_a_network_error() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"Content-Encoding": "gzip"}, content=b"not gzip at all"
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://forge.test"
+    ) as client:
+        with pytest.raises(NetworkError):
+            await request_log_tail(client, "/log", max_bytes=1000)

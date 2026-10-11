@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import os
 import stat
+import time
 from enum import Enum
 from pathlib import Path
 from uuid import UUID
@@ -35,6 +36,10 @@ else:
 from tongs.state.drafts.errors import DraftPermissionError, DraftStoreError
 
 _LOCK_SUFFIX = ".lock"
+# A lock file younger than this may belong to a submission that has created it
+# but not yet locked it, so cleanup on open leaves it alone. Files left by a
+# crashed process are older.
+_STALE_LOCK_MIN_AGE_SECONDS = 60.0
 # One retry covers a holder that unlinked the file between this process's
 # open and its lock. A second stale descriptor reports the attempt as held,
 # which every caller already handles as a transient refusal.
@@ -164,10 +169,13 @@ class AttemptLock:
         Only regular ``<uuid>.lock`` files in the private lock directory are
         candidates, and each one is deleted only after its lock is taken
         without blocking. A file another process holds, a file that fails
-        the private-file checks, and every name in ``keep`` are left alone.
+        the private-file checks, a file modified in the last
+        ``_STALE_LOCK_MIN_AGE_SECONDS`` (another process may be about to lock
+        it), and every name in ``keep`` are left alone.
         Cleanup is housekeeping, so filesystem errors skip the file instead
         of raising. Returns how many lock files were released for deletion.
         """
+        cutoff = time.time() - _STALE_LOCK_MIN_AGE_SECONDS
         try:
             _check_private_directory(directory)
             with os.scandir(directory) as entries:
@@ -176,6 +184,7 @@ class AttemptLock:
                     for entry in entries
                     if _is_attempt_lock_name(entry.name)
                     and entry.is_file(follow_symlinks=False)
+                    and entry.stat(follow_symlinks=False).st_mtime < cutoff
                 ]
         except (DraftStoreError, OSError):
             return 0
@@ -190,7 +199,8 @@ class AttemptLock:
                 continue
             if lock is None:
                 continue
-            lock.release()
+            with contextlib.suppress(OSError):
+                lock.release()
             removed += 1
         return removed
 
