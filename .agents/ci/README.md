@@ -333,6 +333,15 @@ One-time setup, in this order:
 Keep every published version: a release tag must stay rebuildable from the
 digest it pins.
 
+The RPM rebuilds write their payloads with multithreaded zstd: level 19
+(`w19T0.zstdio`) for the published final and companion RPMs, and level 3
+(`w3T0.zstdio`) for the unpublished previous RPMs that only seed the upgrade
+cycle. Multithreaded zstd output does not depend on the runner's CPU count,
+and every rebuild fixes the build host and the build root and takes its build
+time from the source RPM's changelog, so rebuilding one SRPM twice gives
+byte-identical RPM files. The [desktop packaging README](../../packaging/rpm/desktop/README.md#payload-compression-and-reproducible-files)
+has the details.
+
 ## Releases
 
 Two workflows run on a stable `vX.Y.Z` tag. `publish.yml` builds the core

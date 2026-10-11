@@ -27,6 +27,11 @@ and prepare sources. It creates SRPMs offline, provisions one clean Fedora image
 per SRPM with `dnf builddep`, rebuilds each SRPM with networking disabled, and
 installs the result with DNF in another clean Fedora container. No install step
 uses pip or a private Python runtime.
+Every companion RPM is published, so `rebuild_one_srpm.sh` writes its payload
+with multithreaded zstd at level 19 (`w19T0.zstdio`) and uses the same fixed
+build host, fixed build root and changelog-derived build time as the desktop
+rebuilds; see
+[payload compression and reproducible files](../desktop/README.md#payload-compression-and-reproducible-files).
 The retained artifact includes provider resolution, source and Cargo inventories,
 RPM metadata, DNF logs, smoke results, and SHA-256 sums.
 
