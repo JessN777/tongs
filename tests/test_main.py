@@ -11,12 +11,14 @@ import tongs.app
 import tongs.config
 from tongs.__main__ import main
 from tongs.config import Config
+from tongs.services.errors import ServiceError, ServiceErrorCode
 
 
 class _FakeApp:
     """Records the config the entry point starts the app with."""
 
     started: ClassVar[list[Config]] = []
+    shutdown_error: ServiceError | None = None
 
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -82,3 +84,22 @@ def test_valid_config_starts_the_app_with_the_scan_root_override(
     assert main(["--scan-root", "/other"]) == 0
 
     assert [config.scan_root for config in _FakeApp.started] == ["/other"]
+
+
+def test_shutdown_failure_prints_one_line_and_exits_1(
+    config_home: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = ServiceError(
+        ServiceErrorCode.SHUTDOWN_FAILED,
+        "One or more application resources did not close cleanly.",
+    )
+    monkeypatch.setattr(_FakeApp, "shutdown_error", error)
+
+    assert main([]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == f"tongs: {error.message}\n"
+    assert len(_FakeApp.started) == 1

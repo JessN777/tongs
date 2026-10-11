@@ -10,6 +10,7 @@ failures still raise ``ServiceError``.
 from __future__ import annotations
 
 import asyncio
+import functools
 import re
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -42,13 +43,22 @@ MAX_PATH_BYTES = 4096
 #: How many leading bytes are checked for a NUL, as git does, to call a file
 #: binary.
 BINARY_SNIFF_BYTES = 8000
-#: The most decoded file bytes the in-memory cache keeps across all files.
+#: The most bytes the in-memory file cache counts across all files.
 MEMORY_CACHE_BYTES = 32 * _MIB
 # Bytes counted for each memory cache entry on top of its body, so many empty
 # files cannot grow the cache without bound.
 _ENTRY_OVERHEAD_BYTES = 256
+# Bytes counted for each decoded line on top of its text: a str object and
+# its slot in the lines tuple take about this much, so a file of short lines
+# costs far more than its body.
+_LINE_OVERHEAD_BYTES = 64
 #: How many generated file diffs the service keeps in memory.
 GENERATED_CACHE_ENTRIES = 8
+#: The most bytes the generated diff cache counts across all its diffs.
+GENERATED_CACHE_BYTES = 64 * _MIB
+# Bytes counted for each line of a generated diff on top of its text: a
+# DiffLine object with its fields takes about this much.
+_DIFF_LINE_OVERHEAD_BYTES = 192
 #: How many merge bases the service keeps in memory.
 MERGE_BASE_CACHE_ENTRIES = 64
 # File modes that hold no text to diff: a symbolic link and a submodule.
@@ -193,10 +203,19 @@ class ReviewFileService:
             raise ValueError("memory_cache_bytes must not be negative")
         self._get_client = get_client
         self._call = call
-        self._memory = _TextLRU(memory_cache_bytes)
-        self._generated: _EntryLRU[_GeneratedKey, GeneratedDiff] = _EntryLRU(
-            GENERATED_CACHE_ENTRIES
+        self._memory: _SizedLRU[_MemoryKey, FileText] = _SizedLRU(
+            memory_cache_bytes, _entry_size
         )
+        self._generated: _SizedLRU[_GeneratedKey, GeneratedDiff] = _SizedLRU(
+            GENERATED_CACHE_BYTES,
+            _generated_size,
+            max_entries=GENERATED_CACHE_ENTRIES,
+        )
+        # Generations whose worker thread is still running, by the same key as
+        # the generated cache. A thread cannot be stopped, so a cancelled call
+        # leaves it running; a later call for the same file waits for it
+        # instead of starting another.
+        self._running: dict[_GeneratedKey, _RunningGeneration] = {}
         self._merge_bases: _EntryLRU[_MergeBaseKey, str] = _EntryLRU(
             MERGE_BASE_CACHE_ENTRIES
         )
@@ -275,7 +294,9 @@ class ReviewFileService:
         binary, missing and unsupported versions, and a merge base the forge
         cannot find, come back as a status with a message; authentication,
         rate-limit and network failures raise ``ServiceError``. A cancelled
-        call stops both reads and keeps nothing.
+        call stops both reads and keeps nothing; a worker thread already
+        computing the diff runs to its end, and a call for the same file
+        while it runs waits for that thread instead of starting another.
         """
         refused = _generation_refusal(file)
         if refused is not None:
@@ -307,6 +328,9 @@ class ReviewFileService:
         cached = self._generated.get(key)
         if cached is not None:
             return cached
+        running = self._running.get(key)
+        if running is not None:
+            return await self._finish_generation(key, running)
 
         reads: list[Awaitable[FileRead]] = []
         if needs_old:
@@ -326,10 +350,43 @@ class ReviewFileService:
         texts = iter(result.text for result in results)
         old_text = next(texts) if needs_old else None
         new_text = next(texts) if needs_new else None
+        # Another call may have started the same generation during the reads.
+        running = self._running.get(key)
+        if running is None:
+            running = self._start_generation(key, file, old_text, new_text)
+        return await self._finish_generation(key, running)
+
+    def _start_generation(
+        self,
+        key: _GeneratedKey,
+        file: DiffFile,
+        old_text: FileText | None,
+        new_text: FileText | None,
+    ) -> _RunningGeneration:
+        """Run ``generate_file_diff`` in a worker thread, known by ``key``."""
+        future = asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(generate_file_diff, file, old_text, new_text)
+        )
+        running = _RunningGeneration(future, new_text)
+        self._running[key] = running
+
+        def finished(done: asyncio.Future[DiffFile]) -> None:
+            if self._running.get(key) is running:
+                del self._running[key]
+            # Nobody may wait any more: read the outcome so it is never
+            # reported as unretrieved.
+            if not done.cancelled():
+                done.exception()
+
+        future.add_done_callback(finished)
+        return running
+
+    async def _finish_generation(
+        self, key: _GeneratedKey, running: _RunningGeneration
+    ) -> GeneratedDiff:
+        """Wait for a running generation without stopping it on a cancel."""
         try:
-            generated = await asyncio.to_thread(
-                generate_file_diff, file, old_text, new_text
-            )
+            generated = await asyncio.shield(running.future)
         except GenerationTooLargeError as error:
             return GeneratedDiff(
                 GenerationStatus.TOO_LARGE,
@@ -337,7 +394,7 @@ class ReviewFileService:
                 None,
                 diff_too_large_message(error.limit_lines),
             )
-        result = GeneratedDiff(GenerationStatus.OK, generated, new_text, "")
+        result = GeneratedDiff(GenerationStatus.OK, generated, running.new_text, "")
         self._generated.put(key, result)
         return result
 
@@ -540,46 +597,95 @@ def _invalid_path() -> ServiceError:
 
 
 _MemoryKey = tuple[str, str, str, str]
+_GeneratedKey = tuple[str, str, str, str, str, str]
+_MergeBaseKey = tuple[str, str, str, str]
 
 
-class _TextLRU:
-    """Keep decoded files, least recently used first out, within a byte budget."""
+@dataclass(frozen=True, slots=True)
+class _RunningGeneration:
+    """A generation whose worker thread is running, with the new version."""
 
-    def __init__(self, max_bytes: int) -> None:
+    future: asyncio.Future[DiffFile]
+    new_text: FileText | None
+
+
+def _entry_size(text: FileText) -> int:
+    """The bytes a decoded file counts against the file cache's budget."""
+    lines = len(text.lines) * _LINE_OVERHEAD_BYTES
+    return text.byte_size + lines + _ENTRY_OVERHEAD_BYTES
+
+
+def _generated_size(generated: GeneratedDiff) -> int:
+    """The bytes a generated diff counts against the generated cache's budget.
+
+    Its new version is counted too: the generated diff keeps it alive even
+    after the file cache lets it go.
+    """
+    size = _ENTRY_OVERHEAD_BYTES
+    if generated.new_text is not None:
+        size += _entry_size(generated.new_text)
+    if generated.file is not None:
+        for hunk in generated.file.hunks:
+            size += len(hunk.header) + _DIFF_LINE_OVERHEAD_BYTES
+            for line in hunk.lines:
+                size += len(line.content) + _DIFF_LINE_OVERHEAD_BYTES
+    return size
+
+
+class _SizedLRU[K, V]:
+    """Keep values within a byte budget, least recently used first out.
+
+    ``size_of`` tells what each value counts against ``max_bytes``; a value
+    larger than the whole budget is not kept. ``max_entries`` also bounds
+    how many values are kept, when given.
+    """
+
+    def __init__(
+        self,
+        max_bytes: int,
+        size_of: Callable[[V], int],
+        *,
+        max_entries: int | None = None,
+    ) -> None:
         self._max_bytes = max_bytes
-        self._entries: OrderedDict[_MemoryKey, FileText] = OrderedDict()
+        self._size_of = size_of
+        self._max_entries = max_entries
+        self._entries: OrderedDict[K, tuple[V, int]] = OrderedDict()
         self._size = 0
 
-    def get(self, key: _MemoryKey) -> FileText | None:
-        text = self._entries.get(key)
-        if text is not None:
-            self._entries.move_to_end(key)
-        return text
+    @property
+    def size(self) -> int:
+        """The bytes the kept values count, in all."""
+        return self._size
 
-    def put(self, key: _MemoryKey, text: FileText) -> None:
-        size = _entry_size(text)
-        if size > self._max_bytes:
-            return
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def get(self, key: K) -> V | None:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        self._entries.move_to_end(key)
+        return entry[0]
+
+    def put(self, key: K, value: V) -> None:
+        size = self._size_of(value)
         previous = self._entries.pop(key, None)
         if previous is not None:
-            self._size -= _entry_size(previous)
-        self._entries[key] = text
+            self._size -= previous[1]
+        if size > self._max_bytes:
+            return
+        self._entries[key] = (value, size)
         self._size += size
-        while self._size > self._max_bytes:
-            _key, evicted = self._entries.popitem(last=False)
-            self._size -= _entry_size(evicted)
+        while self._size > self._max_bytes or (
+            self._max_entries is not None and len(self._entries) > self._max_entries
+        ):
+            _key, (_value, evicted) = self._entries.popitem(last=False)
+            self._size -= evicted
 
     def clear(self) -> None:
         self._entries.clear()
         self._size = 0
-
-
-def _entry_size(text: FileText) -> int:
-    return text.byte_size + _ENTRY_OVERHEAD_BYTES
-
-
-_GeneratedKey = tuple[str, str, str, str, str, str]
-_MergeBaseKey = tuple[str, str, str, str]
 
 
 class _EntryLRU[K, V]:
