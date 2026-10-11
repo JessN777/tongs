@@ -1086,7 +1086,7 @@ async def test_a_reused_request_id_does_not_release_an_earlier_generation(
         assert "result" in await wired.wire.writer.response(generate_id)
         wired.wire.cancel(generate_id)
 
-        assert (await _page(wired, snapshot, generated["next_cursor"]))
+        assert await _page(wired, snapshot, generated["next_cursor"])
         assert list(wired.server._generated_snapshots) == [snapshot]
 
 
