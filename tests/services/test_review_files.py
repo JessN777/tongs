@@ -327,6 +327,17 @@ class TestMemoryCache:
         assert [call[1] for call in client.calls] == ["a", "b", "c", "b"]
 
     @pytest.mark.asyncio
+    async def test_each_line_counts_against_the_budget(self) -> None:
+        # Both bodies are 1,000 bytes; the second is 1,000 lines, whose line
+        # strings cost far more memory than the body.
+        client = FileClient({"one": b"x" * 1000, "many": b"\n" * 1000})
+        service = service_for(client, memory_cache_bytes=10_000)
+        for path in ("one", "many", "one", "many"):
+            result = await service.read_file(REVIEW, path, SHA)
+            assert result.status is FileReadStatus.OK
+        assert [call[1] for call in client.calls] == ["one", "many", "many"]
+
+    @pytest.mark.asyncio
     async def test_clear_forgets_files(self) -> None:
         client = FileClient({"a.py": b"x\n"})
         service = service_for(client)

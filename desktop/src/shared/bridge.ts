@@ -46,7 +46,7 @@ export interface ReviewSummaryDto {
   readonly deletions: number | null;
 }
 export interface ReviewDetailDto extends ReviewSummaryDto {
-  readonly description: string; readonly merge_status: string;
+  readonly description: string; readonly merge_status: string | null;
   readonly approvals: readonly UserDto[]; readonly reviewers: readonly UserDto[];
   readonly assignees: readonly UserDto[]; readonly changes_count: number;
   readonly detailed_merge_status: string | null; readonly draft_notes_count: number | null;
@@ -152,14 +152,14 @@ export interface DiscussionsRevisionDto extends JsonObject { readonly discussion
  * threads arrives over several pages rather than as one rejected frame.
  */
 export interface DiscussionsPage extends DiscussionsResult { readonly snapshot_id: string; readonly resource: OpaqueHandle; readonly revision: DiscussionsRevisionDto; readonly cursor: number; readonly next_cursor: number | null; }
-export interface CommitDto { readonly sha: string; readonly short_sha: string; readonly title: string; readonly message: string; readonly author: UserDto; readonly created_at: string | null; readonly web_url: string; }
+export interface CommitDto { readonly sha: string; readonly short_sha: string; readonly title: string; readonly message: string; readonly author: UserDto; readonly created_at: string | null; readonly web_url: string | null; }
 export interface CommitsResult { readonly commits: readonly CommitDto[]; }
-export interface PipelineDto { readonly id: number; readonly status: string; readonly ref: string; readonly sha: string; readonly web_url: string; readonly source: string; readonly created_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; }
+export interface PipelineDto { readonly id: number; readonly status: string; readonly ref: string; readonly sha: string; readonly web_url: string | null; readonly source: string | null; readonly created_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; }
 export interface PipelineItemDto { readonly handle: OpaqueHandle; readonly value: PipelineDto; }
 export interface PipelinesResult { readonly pipelines: readonly PipelineItemDto[]; }
 export interface ListPipelinesParams { readonly repository: OpaqueHandle; readonly per_page?: number; }
 export interface ListReviewPipelinesParams { readonly review: OpaqueHandle; readonly per_page?: number; }
-export interface JobDto { readonly id: number; readonly name: string; readonly stage: string; readonly status: string; readonly web_url: string; readonly started_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; readonly allow_failure: boolean; }
+export interface JobDto { readonly id: number; readonly name: string; readonly stage: string | null; readonly status: string; readonly web_url: string | null; readonly started_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; readonly allow_failure: boolean; }
 export interface JobItemDto { readonly handle: OpaqueHandle; readonly value: JobDto; }
 export interface JobsResult { readonly jobs: readonly JobItemDto[]; }
 export interface LogRow { readonly text: string; }
@@ -278,29 +278,48 @@ export const IPC_CHANNELS = Object.freeze({
 } as const);
 
 /**
+ * What a main-process read handler resolves with. A handler never rejects:
+ * Electron logs every rejected handler as an error, and an expected failure,
+ * such as a read the renderer cancelled, is not one. Exactly one of `result`
+ * and `error` is set. The preload checks the envelope and turns `error` back
+ * into the encoded failure below, so the renderer API does not change.
+ */
+export type ReadIPCResult<T = JsonValue> =
+  | { readonly result: T; readonly error: null }
+  | { readonly result: null; readonly error: ServiceErrorDto };
+
+/**
  * Electron rebuilds a rejected `invoke` as a fresh Error and keeps only its
- * message, so a `code` or `retryable` property never survives the read boundary.
- * The main process therefore encodes the failure into the message and the
- * renderer decodes it, which is what lets a read report its real cause instead
- * of one generic sentence for every failure.
+ * message, and a preload rejection reaches the renderer the same way, so a
+ * `code` or `retryable` property never survives the read boundary. The preload
+ * therefore encodes the failure into the message and the renderer decodes it,
+ * which is what lets a read report its real cause instead of one generic
+ * sentence for every failure. The sandboxed preload cannot import this module
+ * and repeats the marker, code pattern and detail bound; the electron IPC
+ * tests check that its encoding decodes here.
  */
 const READ_FAILURE_MARKER = "tongs-read-failure:";
 const READ_FAILURE_PATTERN = /tongs-read-failure:([%A-Za-z0-9!'()*\-._~]+)/;
 const READ_FAILURE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_READ_FAILURE_DETAIL = 240;
 
-export function encodeReadFailure(error: unknown): Error {
+/** The bounded failure a read reports, with an unknown code as invalid_response. */
+export function readFailureOf(error: unknown): ServiceErrorDto {
   const source: Record<string, unknown> =
     error !== null && typeof error === "object"
       ? (error as Record<string, unknown>)
       : {};
   const candidate = typeof source.code === "string" ? source.code : "";
   const detail = typeof source.message === "string" ? source.message : "";
-  const failure: ServiceErrorDto = {
+  return {
     code: READ_FAILURE_CODE.test(candidate) ? candidate : "invalid_response",
     message: readableDetail(detail),
     retryable: source.retryable === true,
   };
+}
+
+export function encodeReadFailure(error: unknown): Error {
+  const failure = readFailureOf(error);
   const encoded = encodeURIComponent(JSON.stringify(failure));
   return new Error(`${READ_FAILURE_MARKER}${encoded} ${failure.message}`);
 }

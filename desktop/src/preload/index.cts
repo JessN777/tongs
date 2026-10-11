@@ -7,7 +7,7 @@ import type {
   LocationParams, LogPage, ServiceStatusDto, OpenDiffParams, OpenLogParams, OpenRepositoryParams,
   PageParams, PipelinesResult, PluginResult, PluginsResult,
   RepositoryDto, RepositoryListResult, ReviewCIStatusParams, ReviewCIStatusResult,
-  ReviewListResult, ReviewSnapshotDto,
+  ReviewListResult, ReviewSnapshotDto, ServiceErrorDto,
 } from "../shared/bridge.js";
 import type {
   CICapabilitiesResult,
@@ -101,11 +101,45 @@ const UTILITY_IPC_CHANNELS = Object.freeze({
   openJobLogInEditor: "tongs:utilities.open-job-log-in-editor",
 } as const);
 
+// A read handler resolves with { result, error } instead of rejecting, so
+// Electron does not log an expected failure such as a cancelled read. The
+// sandboxed preload cannot import the shared bridge: it repeats the read
+// failure encoding from shared/bridge.ts, checks the envelope as strictly as
+// the main-process validators, and rejects with the same encoded failure the
+// renderer already decodes.
+const READ_FAILURE_MARKER = "tongs-read-failure:";
+const READ_FAILURE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+const MAX_READ_FAILURE_DETAIL = 240;
+const INVALID_READ_RESPONSE: ServiceErrorDto = Object.freeze({
+  code: "invalid_response", message: "The desktop read returned an invalid response.", retryable: false,
+});
+function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+function readFailure(failure: ServiceErrorDto): Error {
+  const encoded = encodeURIComponent(JSON.stringify({ code: failure.code, message: failure.message, retryable: failure.retryable }));
+  return new Error(`${READ_FAILURE_MARKER}${encoded} ${failure.message}`);
+}
+function settledRead<T>(value: unknown): T {
+  if (!hasExactKeys(value, ["result", "error"])) throw readFailure(INVALID_READ_RESPONSE);
+  const { result, error } = value;
+  if (error === null) return result as T;
+  if (result !== null || !hasExactKeys(error, ["code", "message", "retryable"])) throw readFailure(INVALID_READ_RESPONSE);
+  const { code, message, retryable } = error;
+  if (
+    typeof code !== "string" || !READ_FAILURE_CODE.test(code) ||
+    typeof message !== "string" || message.length === 0 || message.length > MAX_READ_FAILURE_DETAIL ||
+    typeof retryable !== "boolean"
+  ) throw readFailure(INVALID_READ_RESPONSE);
+  throw readFailure({ code, message, retryable });
+}
+
 const owned = new Set<string>();
 function read<T>(channel: string, params: object): DesktopRead<T> {
   const requestToken = crypto.randomUUID();
   owned.add(requestToken);
-  const result = ipcRenderer.invoke(channel, { requestToken, params }).finally(() => owned.delete(requestToken)) as Promise<T>;
+  const result = ipcRenderer.invoke(channel, { requestToken, params }).then((value: unknown) => settledRead<T>(value)).finally(() => owned.delete(requestToken));
   return Object.freeze({ requestToken, result });
 }
 async function mutate(

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
+import threading
 from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +20,7 @@ from tongs.cache.cached_client import CachedForgeClient
 from tongs.cache.store import CacheStore
 from tongs.config import Config
 from tongs.diff.conversion import convert_forge_changes
-from tongs.diff.generate import GenerationTooLargeError
+from tongs.diff.generate import GenerationTooLargeError, generate_file_diff
 from tongs.diff.models import DiffFile, FileStatus, LineType
 from tongs.errors import AuthError, ContentTooLargeError, NotFoundError
 from tongs.forges.base import ForgeClient
@@ -34,6 +36,7 @@ from tongs.services import (
     ReviewRef,
     ServiceError,
     ServiceErrorCode,
+    review_files,
 )
 from tongs.services.models import ReviewRevision
 from tongs.services.review_files import (
@@ -480,6 +483,57 @@ class TestCaching:
         assert len(client.reads) == reads + 2
 
     @pytest.mark.asyncio
+    async def test_cache_keeps_generated_diffs_within_a_byte_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        paths = ["a.js", "b.js"]
+        client = GenClient(
+            {
+                (path, ref): body
+                for path in paths
+                for ref, body in ((MERGE_BASE, OLD_BODY), (HEAD, NEW_BODY))
+            }
+        )
+        measured = service_for(client)
+        await measured.generate_file_diff(
+            REVIEW, REVISION, truncated(old_path="a.js", new_path="a.js")
+        )
+        one = measured._generated.size
+        # The diff lines and the kept new version both count.
+        assert one > len(NEW_BODY) + 3 * 192
+        monkeypatch.setattr(review_files, "GENERATED_CACHE_BYTES", one + one // 2)
+        service = service_for(client)
+        for path in paths:
+            await service.generate_file_diff(
+                REVIEW, REVISION, truncated(old_path=path, new_path=path)
+            )
+        assert len(service._generated) == 1
+        assert service._generated.size <= one + one // 2
+        service._memory.clear()
+        reads = len(client.reads)
+        await service.generate_file_diff(
+            REVIEW, REVISION, truncated(old_path="b.js", new_path="b.js")
+        )
+        assert len(client.reads) == reads
+        await service.generate_file_diff(
+            REVIEW, REVISION, truncated(old_path="a.js", new_path="a.js")
+        )
+        assert len(client.reads) == reads + 2
+
+    @pytest.mark.asyncio
+    async def test_a_diff_larger_than_the_budget_is_not_kept(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(review_files, "GENERATED_CACHE_BYTES", 1024)
+        client = both_sides()
+        service = service_for(client)
+        first = await service.generate_file_diff(REVIEW, REVISION, truncated())
+        second = await service.generate_file_diff(REVIEW, REVISION, truncated())
+        assert first.status is second.status is GenerationStatus.OK
+        assert len(service._generated) == 0
+        assert service._generated.size == 0
+
+    @pytest.mark.asyncio
     async def test_failures_are_not_cached(self) -> None:
         client = GenClient({("lib/app.js", HEAD): NEW_BODY})
         service = service_for(client)
@@ -493,6 +547,25 @@ class TestCaching:
         client = both_sides()
         service = service_for(client)
         await service.generate_file_diff(REVIEW, REVISION, truncated())
+        service.clear()
+        await service.generate_file_diff(REVIEW, REVISION, truncated())
+        assert len(client.reads) == 4
+        assert len(client.merge_base_calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_clear_forgets_a_finished_generation_not_yet_released(self) -> None:
+        client = both_sides()
+        service = service_for(client)
+        task = asyncio.create_task(
+            service.generate_file_diff(REVIEW, REVISION, truncated())
+        )
+        # Catch the generation while it is registered as running.
+        while not service._running:
+            await asyncio.sleep(0)
+        key, running = next(iter(service._running.items()))
+        await task
+        # Its done callback can run after the caller returns on some loops.
+        service._running[key] = running
         service.clear()
         await service.generate_file_diff(REVIEW, REVISION, truncated())
         assert len(client.reads) == 4
@@ -515,6 +588,94 @@ class TestCaching:
         result = await service.generate_file_diff(REVIEW, REVISION, truncated())
         assert result.status is GenerationStatus.OK
         assert len(client.reads) == 4
+
+
+class TestRunningGenerations:
+    @pytest.mark.asyncio
+    async def test_a_generation_still_running_after_a_cancel_is_reused(
+        self,
+    ) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        threads: list[str] = []
+
+        def slow(source: DiffFile, old: object, new: object) -> DiffFile:
+            threads.append(threading.current_thread().name)
+            started.set()
+            release.wait(5)
+            return generate_file_diff(source, old, new)  # type: ignore[arg-type]
+
+        client = both_sides()
+        service = service_for(client)
+        try:
+            with patch("tongs.services.review_files.generate_file_diff", slow):
+                first = asyncio.create_task(
+                    service.generate_file_diff(REVIEW, REVISION, truncated())
+                )
+                assert await asyncio.to_thread(started.wait, 5)
+                first.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await first
+                # The thread cannot stop; pressing e again waits for it.
+                second = asyncio.create_task(
+                    service.generate_file_diff(REVIEW, REVISION, truncated())
+                )
+                third = asyncio.create_task(
+                    service.generate_file_diff(REVIEW, REVISION, truncated())
+                )
+                await asyncio.sleep(0.05)
+                assert len(threads) == 1
+                assert len(client.reads) == 2
+                release.set()
+                results = await asyncio.wait_for(asyncio.gather(second, third), 5)
+        finally:
+            release.set()
+        assert [result.status for result in results] == [GenerationStatus.OK] * 2
+        assert results[0].file is results[1].file
+        assert results[0].file is not None
+        assert apply(lines(OLD_BODY), results[0].file) == lines(NEW_BODY)
+        assert len(threads) == 1
+        assert len(client.reads) == 2
+        assert service._running == {}
+        again = await service.generate_file_diff(REVIEW, REVISION, truncated())
+        assert again.file is results[0].file
+
+    @pytest.mark.asyncio
+    async def test_a_generation_left_running_finishes_quietly(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+
+        def too_long(*_args: object) -> DiffFile:
+            started.set()
+            release.wait(5)
+            raise GenerationTooLargeError(100_000)
+
+        loop = asyncio.get_running_loop()
+        reported: list[dict[str, object]] = []
+        loop.set_exception_handler(lambda _loop, context: reported.append(context))
+        service = service_for(both_sides())
+        try:
+            with patch("tongs.services.review_files.generate_file_diff", too_long):
+                task = asyncio.create_task(
+                    service.generate_file_diff(REVIEW, REVISION, truncated())
+                )
+                assert await asyncio.to_thread(started.wait, 5)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+                release.set()
+                for _ in range(100):
+                    if not service._running:
+                        break
+                    await asyncio.sleep(0.01)
+            assert service._running == {}
+            del task
+            gc.collect()
+            assert reported == []
+            assert len(service._generated) == 0
+        finally:
+            release.set()
+            loop.set_exception_handler(None)
 
 
 def _compare_response() -> httpx.Response:

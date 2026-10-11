@@ -455,17 +455,21 @@ function PipelineSummary({
         <p className="eyebrow">Selected pipeline</p>
         <h3>Pipeline #{pipeline.value.id}</h3>
         <p className="ci-meta">
-          {pipeline.value.ref} · {pipeline.value.source} ·{" "}
-          {formatDate(pipeline.value.created_at)}
+          {[
+            pipeline.value.ref,
+            pipeline.value.source,
+            formatDate(pipeline.value.created_at),
+          ]
+            .filter((part) => part !== null)
+            .join(" · ")}
         </p>
       </div>
       <div className="ci-actions">
-        <button
-          className="button button-secondary"
-          onClick={() => void openOnForge(pipeline.value.web_url, "Pipeline")}
-        >
-          Open pipeline on forge
-        </button>
+        <ForgeLinkButton
+          url={pipeline.value.web_url}
+          label="Pipeline"
+          openOnForge={openOnForge}
+        />
         <ActionButton
           label="Retry pipeline"
           supported={capabilities?.retry_pipeline === true}
@@ -579,19 +583,18 @@ function JobsPanel({
                   {item.value.status}
                 </span>
                 <strong>{item.value.name}</strong>
-                <span>{item.value.stage}</span>
+                <span>{item.value.stage ?? NO_STAGE}</span>
               </button>
             ))}
           </div>
           {selected && (
             <div className="ci-job-detail">
               <div className="ci-actions">
-                <button
-                  className="button button-secondary"
-                  onClick={() => void openOnForge(selected.value.web_url, "Job")}
-                >
-                  Open job on forge
-                </button>
+                <ForgeLinkButton
+                  url={selected.value.web_url}
+                  label="Job"
+                  openOnForge={openOnForge}
+                />
                 <ActionButton
                   label="Retry job"
                   supported={capabilities?.retry_job === true}
@@ -986,6 +989,37 @@ function LogWindow({
         </nav>
       )}
     </div>
+  );
+}
+
+// A forge may leave a job's stage or a pipeline's link out. The service sends
+// that absence as null, which the view shows plainly instead of failing.
+const NO_STAGE = "No stage";
+
+function ForgeLinkButton({
+  url,
+  label,
+  openOnForge,
+}: {
+  readonly url: string | null;
+  readonly label: string;
+  readonly openOnForge: (url: string, label: string) => Promise<void>;
+}): ReactNode {
+  return (
+    <button
+      className="button button-secondary"
+      disabled={url === null}
+      title={
+        url === null
+          ? `The forge did not provide a link for this ${label.toLowerCase()}.`
+          : undefined
+      }
+      onClick={() => {
+        if (url !== null) void openOnForge(url, label);
+      }}
+    >
+      Open {label.toLowerCase()} on forge
+    </button>
   );
 }
 

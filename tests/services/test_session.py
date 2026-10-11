@@ -801,6 +801,179 @@ class TestLifecycle:
         assert cache.close_calls == 1
 
     @pytest.mark.asyncio
+    async def test_final_close_after_failed_cleanup_closes_dependencies(
+        self,
+    ) -> None:
+        cache = FakeCache()
+        drafts = FakeDraftStore()
+        registry = FakeRegistry()
+        session = await ApplicationSession(
+            config=Config(),
+            cache=cache,
+            draft_store=cast(DraftStore, drafts),
+            forge_registry=registry,
+        ).start()
+        submission_close = AsyncMock(side_effect=RuntimeError("owner still active"))
+        session.review_submissions.close = submission_close
+
+        with pytest.raises(ServiceError):
+            await session.close()
+        assert (drafts.close_calls, registry.close_calls, cache.close_calls) == (
+            0,
+            0,
+            0,
+        )
+
+        with pytest.raises(ServiceError) as raised:
+            await session.close(final=True)
+
+        assert raised.value.code is ServiceErrorCode.SHUTDOWN_FAILED
+        assert session.shutdown_error is raised.value
+        assert submission_close.await_count == 2
+        assert (drafts.close_calls, registry.close_calls, cache.close_calls) == (
+            1,
+            1,
+            1,
+        )
+        assert session.ci_mutations._closed is True
+        assert session.review_mutations._closed is True
+        assert session.mr_actions._closed is True
+        with pytest.raises(ServiceError) as closed:
+            session.emit_change(ServiceEventKind.REVIEW_CHANGED)
+        assert closed.value.code is ServiceErrorCode.CLOSED
+
+        # Closing again does not reopen or close anything twice.
+        with pytest.raises(ServiceError):
+            await session.close(final=True)
+        assert (drafts.close_calls, registry.close_calls, cache.close_calls) == (
+            1,
+            1,
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_final_close_after_clean_shutdown_is_a_no_op(self) -> None:
+        cache = FakeCache()
+        drafts = FakeDraftStore()
+        registry = FakeRegistry()
+        session = await ApplicationSession(
+            config=Config(),
+            cache=cache,
+            draft_store=cast(DraftStore, drafts),
+            forge_registry=registry,
+        ).start()
+
+        await session.close(final=True)
+        await session.close(final=True)
+
+        assert session.shutdown_error is None
+        assert (drafts.close_calls, registry.close_calls, cache.close_calls) == (
+            1,
+            1,
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_final_close_requested_during_a_failing_close_closes_stores(
+        self,
+    ) -> None:
+        cache = FakeCache()
+        drafts = FakeDraftStore()
+        registry = FakeRegistry()
+        session = await ApplicationSession(
+            config=Config(),
+            cache=cache,
+            draft_store=cast(DraftStore, drafts),
+            forge_registry=registry,
+        ).start()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def failing_close() -> None:
+            started.set()
+            await release.wait()
+            raise RuntimeError("owner still active")
+
+        session.review_submissions.close = failing_close  # type: ignore[method-assign]
+        plain = asyncio.create_task(session.close())
+        await started.wait()
+        final = asyncio.create_task(session.close(final=True))
+        await asyncio.sleep(0)
+        release.set()
+
+        with pytest.raises(ServiceError):
+            await plain
+        with pytest.raises(ServiceError) as raised:
+            await final
+
+        assert raised.value.code is ServiceErrorCode.SHUTDOWN_FAILED
+        assert (drafts.close_calls, registry.close_calls, cache.close_calls) == (
+            1,
+            1,
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_final_close_stops_every_sqlite_worker_thread(
+        self, tmp_path: Path
+    ) -> None:
+        before = set(threading.enumerate())
+        session = await ApplicationSession(
+            config=Config(),
+            cache_path=tmp_path / "cache.db",
+            draft_db_path=tmp_path / "drafts.db",
+            forge_registry=FakeRegistry(),
+            shutdown_timeout=0.5,
+        ).start()
+        workers = [
+            thread
+            for thread in set(threading.enumerate()) - before
+            if "_connection_worker_thread" in thread.name
+        ]
+        assert len(workers) == 2
+        session.review_submissions.close = AsyncMock(
+            side_effect=RuntimeError("owner still active")
+        )
+
+        with pytest.raises(ServiceError):
+            await session.close()
+        assert all(thread.is_alive() for thread in workers)
+
+        with pytest.raises(ServiceError):
+            await session.close(final=True)
+        for thread in workers:
+            await asyncio.to_thread(thread.join, 5)
+        assert [thread.is_alive() for thread in workers] == [False, False]
+
+    @pytest.mark.asyncio
+    async def test_final_close_lets_a_running_draft_write_finish_first(
+        self, tmp_path: Path
+    ) -> None:
+        drafts = DraftStore(tmp_path / "drafts.db")
+        session = await ApplicationSession(
+            config=Config(),
+            cache=FakeCache(),
+            draft_store=drafts,
+            forge_registry=FakeRegistry(),
+        ).start()
+        session.review_submissions.close = AsyncMock(
+            side_effect=RuntimeError("owner still active")
+        )
+        # A serialized draft store operation is running.
+        await drafts._operation_lock.acquire()
+
+        final = asyncio.create_task(session.close(final=True))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert not final.done()
+        assert drafts._db is not None
+
+        drafts._operation_lock.release()
+        with pytest.raises(ServiceError):
+            await final
+        assert drafts._db is None
+
+    @pytest.mark.asyncio
     async def test_active_submission_settles_before_store_and_forge_close(
         self, tmp_path: Path
     ) -> None:
