@@ -217,6 +217,52 @@ test("n and p step the threads and pending cards in document order and wrap", as
   assert.equal(focusedRow(), "thread:d-2");
 });
 
+test("n and p step from the row the focus is on, not only from the last step", async () => {
+  const review = "keys-rows-focused";
+  const view = renderDiff(
+    diffBridge(review, {
+      listDiscussions: () =>
+        read(discussionsPage([thread("d-1", { line: 10 }), thread("d-2", { line: 11 })])),
+      listReviewDrafts: () =>
+        read({
+          cursor: 0,
+          next_cursor: null,
+          drafts: [draft(review, 4, [inlineEntry("entry-a", "Float division", 11)])],
+        }),
+    }),
+    review,
+  );
+  await waitForCount(
+    () => view.container.querySelectorAll("[data-review-row]").length,
+    3,
+  );
+  const focusRow = (key) => {
+    const row = view.container.querySelector(`[data-review-row="${key}"]`);
+    (row.querySelector("button:not([disabled]), [tabindex]") ?? row).focus();
+  };
+  // A key typed while a row holds the focus is dispatched from that row.
+  const press = (key) =>
+    fireEvent.keyDown(document.activeElement ?? document.body, { key });
+
+  // No step has been taken yet, so only the focus says where the cursor is.
+  focusRow("thread:d-2");
+  assert.equal(focusedRow(), "thread:d-2");
+  press("n");
+  assert.equal(focusedRow(), "pending:entry-a");
+
+  // The last step landed on the pending card; the reader then focused the
+  // first thread, and the next step starts there.
+  focusRow("thread:d-1");
+  assert.equal(focusedRow(), "thread:d-1");
+  press("n");
+  assert.equal(focusedRow(), "thread:d-2");
+
+  // The same holds backwards, and wraps from the focused first row.
+  focusRow("thread:d-1");
+  press("p");
+  assert.equal(focusedRow(), "pending:entry-a");
+});
+
 test("r replies to the thread the row cursor is on", async () => {
   const review = "keys-reply";
   const view = renderDiff(
