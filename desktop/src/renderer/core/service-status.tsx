@@ -70,7 +70,8 @@ export class ServiceStatusModel {
   applyStatus(status: ServiceStatusDto): void {
     if (!isStatus(status) || status.revision <= this.#revision) return;
     this.#revision = status.revision;
-    const reconnected = status.state === "connected" && this.#state === "stopped";
+    const reconnected =
+      status.state === "connected" && this.#state === "stopped";
     this.#state = status.state;
     this.#recovery = statusRecovery(status);
     if (reconnected) {
@@ -80,7 +81,9 @@ export class ServiceStatusModel {
     this.#refresh();
     // Keep every notice already shown until the user dismisses it, even when
     // a later report, such as a stopped service, carries none.
-    this.#setNotices([...new Set([...this.#notices, ...statusNotices(status)])]);
+    this.#setNotices([
+      ...new Set([...this.#notices, ...statusNotices(status)]),
+    ]);
   }
 
   probeSucceeded(): void {
@@ -138,7 +141,10 @@ export class ServiceStatusModel {
 
   #refresh(): void {
     const next = this.#compute();
-    if (next.text === this.#view.text && next.className === this.#view.className) {
+    if (
+      next.text === this.#view.text &&
+      next.className === this.#view.className
+    ) {
       return;
     }
     this.#view = next;
@@ -148,21 +154,39 @@ export class ServiceStatusModel {
   #compute(): ServiceStatusView {
     if (this.#state === "stopped") {
       if (this.#recovery === "restarting") {
-        return view(SERVICE_STATUS_TEXT.restarting, `${BASE_CLASS} service-status-warning`);
+        return view(
+          SERVICE_STATUS_TEXT.restarting,
+          `${BASE_CLASS} service-status-warning`,
+        );
       }
       if (this.#recovery === "failed") {
-        return view(SERVICE_STATUS_TEXT.failed, `${BASE_CLASS} service-status-error`);
+        return view(
+          SERVICE_STATUS_TEXT.failed,
+          `${BASE_CLASS} service-status-error`,
+        );
       }
-      return view(SERVICE_STATUS_TEXT.stopped, `${BASE_CLASS} service-status-error`);
+      return view(
+        SERVICE_STATUS_TEXT.stopped,
+        `${BASE_CLASS} service-status-error`,
+      );
     }
     if (this.#probeFailed) {
-      return view(SERVICE_STATUS_TEXT.unavailable, `${BASE_CLASS} service-status-error`);
+      return view(
+        SERVICE_STATUS_TEXT.unavailable,
+        `${BASE_CLASS} service-status-error`,
+      );
     }
     if (this.#updates) {
-      return view(SERVICE_STATUS_TEXT.updates, `${BASE_CLASS} service-status-warning`);
+      return view(
+        SERVICE_STATUS_TEXT.updates,
+        `${BASE_CLASS} service-status-warning`,
+      );
     }
     if (this.#state === "connected" || this.#probeOk) {
-      return view(SERVICE_STATUS_TEXT.connected, `${BASE_CLASS} service-status-ready`);
+      return view(
+        SERVICE_STATUS_TEXT.connected,
+        `${BASE_CLASS} service-status-ready`,
+      );
     }
     return view(SERVICE_STATUS_TEXT.connecting, BASE_CLASS);
   }
@@ -236,7 +260,8 @@ function statusNotices(status: ServiceStatusDto): readonly string[] {
   const notices: unknown = (status as { notices?: unknown }).notices;
   if (!Array.isArray(notices)) return NO_NOTICES;
   return notices.filter(
-    (notice): notice is string => typeof notice === "string" && notice.length > 0,
+    (notice): notice is string =>
+      typeof notice === "string" && notice.length > 0,
   );
 }
 

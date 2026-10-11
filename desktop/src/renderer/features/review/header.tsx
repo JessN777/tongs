@@ -8,10 +8,7 @@ import type {
   ReviewAction,
   ReviewActionCapabilitiesDto,
 } from "../../../shared/review.js";
-import type {
-  AppRoute,
-  DiscussionDiffTarget,
-} from "../../core/navigation.js";
+import type { AppRoute, DiscussionDiffTarget } from "../../core/navigation.js";
 import { safeError } from "../../core/presentation.js";
 import {
   isUncertainError,
@@ -145,7 +142,10 @@ function HeaderReviewDrawer({
 type CapabilityStanding =
   | { readonly kind: "loading" }
   | { readonly kind: "failed"; readonly message: string }
-  | { readonly kind: "known"; readonly capabilities: ReviewActionCapabilitiesDto };
+  | {
+      readonly kind: "known";
+      readonly capabilities: ReviewActionCapabilitiesDto;
+    };
 
 /**
  * The lifecycle actions on the review itself. Each needs a second press on its
@@ -271,7 +271,11 @@ function ReviewLifecycleActions({
       apply((current) =>
         isUncertainError(reason)
           ? markQuickIntentUncertain(current, operationId)
-          : rejectQuickIntent(current, operationId, reviewMutationError(reason)),
+          : rejectQuickIntent(
+              current,
+              operationId,
+              reviewMutationError(reason),
+            ),
       );
     }
   };

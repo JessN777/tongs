@@ -5,10 +5,7 @@ import type {
   DiscussionsPage,
   DiscussionsResult,
 } from "../../../shared/bridge.js";
-import {
-  RendererReadError,
-  serviceErrorOf,
-} from "../../core/presentation.js";
+import { RendererReadError, serviceErrorOf } from "../../core/presentation.js";
 import type { CoordinatedRead } from "../../core/query.js";
 
 export type DiscussionPagesBridge = Pick<
@@ -91,7 +88,9 @@ export function readAllDiscussions(
       )
         throw discussionsChanged();
       if (page.cursor !== cursor)
-        throw invalidPage("The discussions page cursor did not match the request.");
+        throw invalidPage(
+          "The discussions page cursor did not match the request.",
+        );
       discussions.push(...page.discussions);
       pageCount += 1;
     }

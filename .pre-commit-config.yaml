@@ -1,0 +1,44 @@
+# Local pre-commit hooks that mirror the lint-and-format CI job.
+#
+#   python -m pip install pre-commit
+#   npm ci --prefix desktop/tools/lint
+#   pre-commit install
+#
+# The Ruff hooks run the ruff of the active environment: the checkout's .venv,
+# where the lint extra in pyproject.toml installs the exact version CI uses,
+# so the pin lives in one place.  The desktop hooks run the pinned Prettier and
+# ESLint from desktop/tools/lint, so they need that package installed first.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^(src|tests|packaging|scripts|\.github/scripts|examples)/
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format --check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^(src|tests|packaging|scripts|\.github/scripts|examples)/
+      # Every staged file, with no type filter: pre-commit's own type
+      # detection calls a file with NUL bytes binary, which is the case this
+      # hook exists to catch.
+      - id: control-characters
+        name: control characters in text files
+        entry: python scripts/check_control_chars.py
+        language: python
+      - id: desktop-format
+        name: desktop format check (Prettier)
+        entry: npm run format:check --prefix desktop
+        language: system
+        files: ^desktop/
+        pass_filenames: false
+      - id: desktop-lint
+        name: desktop lint (ESLint)
+        entry: npm run lint --prefix desktop
+        language: system
+        files: ^desktop/
+        pass_filenames: false

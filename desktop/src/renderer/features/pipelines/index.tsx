@@ -115,7 +115,8 @@ function PipelinesView({
   readonly panels: readonly ReviewPanelContribution[];
 }): ReactNode {
   const pipelinesBegin = useCallback(
-    () => bridge.listReviewPipelines({ review: route.item.handle, per_page: 100 }),
+    () =>
+      bridge.listReviewPipelines({ review: route.item.handle, per_page: 100 }),
     [bridge, route.item.handle],
   );
   const pipelines = useRetainedRead(
@@ -241,8 +242,9 @@ function PipelinesView({
       inFlightOperation.current = intent.operationId;
       setMutation({ kind: "submitting", intent });
       try {
-        const result = await queries.run(`ci-receipt:${intent.operationId}`, () =>
-          bridge.getCIReceipt(receiptParams(intent)),
+        const result = await queries.run(
+          `ci-receipt:${intent.operationId}`,
+          () => bridge.getCIReceipt(receiptParams(intent)),
         );
         if (result.receipt === null) {
           setMutation({
@@ -324,18 +326,22 @@ function PipelinesView({
         </button>
       </div>
       {eventNotice && <Notice kind="loading">{eventNotice}</Notice>}
-      {forgeNotice && <Notice kind={forgeNotice.kind}>{forgeNotice.message}</Notice>}
+      {forgeNotice && (
+        <Notice kind={forgeNotice.kind}>{forgeNotice.message}</Notice>
+      )}
       {capabilities.loading && !capabilities.value && (
         <Notice kind="loading">Checking CI action support…</Notice>
       )}
       {Boolean(capabilities.error) && (
         <Notice kind="error">
-          CI action support is unavailable. Pipeline and log reads remain available.
+          CI action support is unavailable. Pipeline and log reads remain
+          available.
         </Notice>
       )}
       {capabilitiesMismatch && (
         <Notice kind="error">
-          CI action support did not match this repository. Actions remain disabled.
+          CI action support did not match this repository. Actions remain
+          disabled.
         </Notice>
       )}
       {pipelines.loading && !pipelines.value && (
@@ -526,12 +532,10 @@ function JobsPanel({
     () => bridge.listJobs(pipeline.handle),
     [bridge, pipeline.handle],
   );
-  const jobs = useRetainedRead(
-    queries,
-    `ci-jobs:${pipeline.handle}`,
-    begin,
-    [pipeline.handle, refreshEpoch],
-  );
+  const jobs = useRetainedRead(queries, `ci-jobs:${pipeline.handle}`, begin, [
+    pipeline.handle,
+    refreshEpoch,
+  ]);
   const items = jobs.value?.jobs ?? [];
   const selected =
     items.find((item) => item.handle === selectedJob?.handle) ?? null;
@@ -565,11 +569,9 @@ function JobsPanel({
             : safeError(jobs.error)}
         </Notice>
       )}
-      {jobs.value !== null &&
-        items.length === 0 &&
-        !jobs.loading && (
-          <Notice kind="empty">This pipeline has no jobs.</Notice>
-        )}
+      {jobs.value !== null && items.length === 0 && !jobs.loading && (
+        <Notice kind="empty">This pipeline has no jobs.</Notice>
+      )}
       {items.length > 0 && (
         <div className="ci-job-layout">
           <div
@@ -613,7 +615,9 @@ function JobsPanel({
                   supported={capabilities?.cancel_job === true}
                   unavailable={capabilities === null}
                   locked={actionsLocked}
-                  onClick={() => beginMutation("cancel_job", pipeline, selected)}
+                  onClick={() =>
+                    beginMutation("cancel_job", pipeline, selected)
+                  }
                 />
               </div>
               <LogPanel
@@ -688,7 +692,8 @@ function LogPanel({
     } catch {
       setEditorNotice({
         kind: "error",
-        message: "The editor could not be started. Check the configured command and retry.",
+        message:
+          "The editor could not be started. Check the configured command and retry.",
       });
     } finally {
       editorInFlight.current = false;
@@ -976,7 +981,8 @@ function LogWindow({
               data-line={index + 1}
             >
               <span className="ci-log-number">{index + 1}</span>
-              <span>{line}</span>{"\n"}
+              <span>{line}</span>
+              {"\n"}
             </code>
           );
         })}
@@ -986,7 +992,9 @@ function LogWindow({
           <button
             className="button button-secondary"
             disabled={boundedStart === 0}
-            onClick={() => setStart(Math.max(0, boundedStart - LOG_WINDOW_SIZE))}
+            onClick={() =>
+              setStart(Math.max(0, boundedStart - LOG_WINDOW_SIZE))
+            }
           >
             Previous rows
           </button>
@@ -1168,7 +1176,9 @@ function MutationStatus({
   return (
     <section className="ci-mutation-result ci-outcome-unknown" role="alert">
       <strong>
-        {state.uncertain ? "CI action needs reconciliation" : "CI action rejected"}
+        {state.uncertain
+          ? "CI action needs reconciliation"
+          : "CI action rejected"}
       </strong>
       <p>
         {actionLabel(state.intent.action)} for {target}. Operation{" "}
@@ -1292,7 +1302,8 @@ function logTail(
   }
   if (truncated) {
     const newline = text.indexOf("\n");
-    if (newline !== -1 && newline < text.length - 1) text = text.slice(newline + 1);
+    if (newline !== -1 && newline < text.length - 1)
+      text = text.slice(newline + 1);
   }
   if (text.length === 0) return { lines: [], truncated };
   const rawLines = text.split("\n");
@@ -1301,7 +1312,9 @@ function logTail(
   return {
     lines: rawLines
       .slice(Math.max(0, rawLines.length - limit))
-      .map((line) => sanitizeLogText(line.endsWith("\r") ? line.slice(0, -1) : line)),
+      .map((line) =>
+        sanitizeLogText(line.endsWith("\r") ? line.slice(0, -1) : line),
+      ),
     truncated,
   };
 }
@@ -1342,9 +1355,7 @@ export function sanitizeLogText(value: string): string {
   return result;
 }
 
-export function classifyMutationFailure(
-  error: unknown,
-): "known" | "unknown" {
+export function classifyMutationFailure(error: unknown): "known" | "unknown" {
   const code = errorCode(error);
   return new Set([
     "authentication_failed",
@@ -1424,7 +1435,8 @@ async function executeMutation(
     pipeline: intent.pipeline.handle,
   };
   if (intent.action === "retry_pipeline") return bridge.retryPipeline(pipeline);
-  if (intent.action === "cancel_pipeline") return bridge.cancelPipeline(pipeline);
+  if (intent.action === "cancel_pipeline")
+    return bridge.cancelPipeline(pipeline);
   if (intent.job === null)
     throw new RendererReadError(
       "invalid_response",
@@ -1437,7 +1449,10 @@ async function executeMutation(
 }
 
 function receiptParams(intent: MutationIntent): CIReceiptParams {
-  if (intent.action === "retry_pipeline" || intent.action === "cancel_pipeline") {
+  if (
+    intent.action === "retry_pipeline" ||
+    intent.action === "cancel_pipeline"
+  ) {
     return {
       operation_id: intent.operationId,
       action: intent.action,
@@ -1492,7 +1507,10 @@ function mutationErrorText(error: { readonly code: string }): string {
     : "The remote result could not be confirmed. Refresh current state.";
 }
 
-export function mutationFailureText(error: unknown, uncertain: boolean): string {
+export function mutationFailureText(
+  error: unknown,
+  uncertain: boolean,
+): string {
   if (uncertain)
     return "The response ended after the action may have been dispatched. It will not be replayed automatically.";
   const code = errorCode(error);

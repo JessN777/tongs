@@ -442,6 +442,28 @@ RULES: tuple[Rule, ...] = (
         patterns=("scripts/release-evidence/**",),
         lanes=frozenset({"lint", "core"}),
     ),
+    # The control-character check, which both the lint and the docs jobs run.
+    Rule(
+        name="control-character-check",
+        patterns=("scripts/check_control_chars.py",),
+        lanes=frozenset({"docs", "lint"}),
+    ),
+    # The desktop formatter and linter package and its configuration, which
+    # the lint job installs and runs.  The archive never reads them, because
+    # its source inputs and ASAR allowlist name desktop paths explicitly, but
+    # the desktop jobs work inside desktop/, so they run as well.
+    Rule(
+        name="desktop-lint-tooling",
+        patterns=("desktop/tools/lint/**", "desktop/.prettierignore"),
+        lanes=frozenset({"lint", "desktop"}),
+    ),
+    # Repository tooling records that tests/ci/test_lint_tooling_contract.py
+    # reads in the lint job.
+    Rule(
+        name="repository-tooling",
+        patterns=(".pre-commit-config.yaml", ".git-blame-ignore-revs"),
+        lanes=frozenset({"lint"}),
+    ),
     # The Dependabot configuration is read by tests/ci/test_workflow_hygiene.py.
     # The RPM builder workflow's pin job runs scripts/pin_rpm_builder.py.
     Rule(

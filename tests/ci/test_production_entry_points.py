@@ -202,6 +202,11 @@ ENTRY_POINTS: tuple[EntryPoint, ...] = (
         jobs=("rpm-builder-image.yml:pin",),
         note="the pin job installs nothing and runs the runner's python3",
     ),
+    EntryPoint(
+        program="scripts/check_control_chars.py",
+        jobs=("ci.yml:lint-and-format", "ci.yml:docs"),
+        note="the docs job installs no Python packages and runs the runner's python3",
+    ),
 )
 
 _MINIMAL_ENVIRONMENT_PROBE = """

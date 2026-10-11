@@ -150,7 +150,10 @@ export const SafeMarkdown = memo(function SafeMarkdown({
       a: ({ children, href }) => {
         const destination = admitMarkdownExternalUrl(href ?? "");
         return destination ? (
-          <SafeExternalLink destination={destination} openExternal={openExternal}>
+          <SafeExternalLink
+            destination={destination}
+            openExternal={openExternal}
+          >
             {children}
           </SafeExternalLink>
         ) : (
@@ -222,7 +225,9 @@ function SafeExternalLink({
   const descriptionId = useId();
   const host = externalLinkHost(destination);
   const mismatched = linkTextNamesOtherOrigin(linkText(children), destination);
-  const activate = async (event: MouseEvent<HTMLButtonElement>): Promise<void> => {
+  const activate = async (
+    event: MouseEvent<HTMLButtonElement>,
+  ): Promise<void> => {
     event.preventDefault();
     if (opening) return;
     setOpening(true);
@@ -337,7 +342,7 @@ function schemelessTextNamesOtherHost(text: string, target: URL): boolean {
     )?.[0];
     return (
       topLabel !== undefined &&
-      (isWebTopLabel(topLabel) || /[^\x00-\x7f]/u.test(topLabel))
+      (isWebTopLabel(topLabel) || /[^\p{ASCII}]/u.test(topLabel))
     );
   }
   // Userinfo that itself reads like a dotted name, as in
@@ -423,6 +428,7 @@ export function admitMarkdownExternalUrl(value: string): string | null {
   if (
     value.length === 0 ||
     value.length > MAX_EXTERNAL_URL_LENGTH ||
+    // eslint-disable-next-line no-control-regex -- this pattern rejects control characters on purpose.
     /[\s\u0000-\u001f\u007f]/u.test(value)
   ) {
     return null;

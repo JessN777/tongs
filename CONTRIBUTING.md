@@ -51,9 +51,12 @@ npm ci --prefix desktop
    pytest
    ruff check src/ tests/ packaging/ scripts/ .github/scripts/ examples/
    ruff format --check src/ tests/ packaging/ scripts/ .github/scripts/ examples/
+   python scripts/check_control_chars.py
    ```
 
-   Run `ruff format <file>` to fix formatting.
+   Run `ruff format <file>` to fix formatting. The last command fails if a
+   text file holds a NUL byte or another control character other than tab,
+   line feed and CRLF line endings.
 4. Open a pull request and fill in the short template. CI runs the checks for
    the paths you changed, and the `CI aggregate` check reports the result. A
    maintainer will review it.
@@ -63,19 +66,41 @@ ones.
 
 ### Desktop changes
 
-Build the desktop app and run its tests:
+The desktop build (`npm run build --prefix desktop`) and its tests
+(`npm test --prefix desktop`, with `TONGS_TEST_PYTHON` set to your Python) can
+use a lot of memory, so run them under the memory limit in the
+[testing guide](.agents/testing/README.md#bounded-local-node-procedure). It
+shows how to run the build and a single test file, which is usually all you
+need while developing. The `test` script runs one test file at a time. In
+renderer tests, assert on text, attributes, and counts rather than on DOM nodes:
+a failing assertion on a DOM node can use more than a gigabyte of memory while
+it formats the error.
+
+The desktop sources are formatted by Prettier with its default options and
+linted by ESLint with typescript-eslint's recommended rules. Both live in their
+own pinned package, so install it once and run the checks from the root of
+your clone:
 
 ```bash
-npm run build --prefix desktop
-TONGS_TEST_PYTHON="$(command -v python)" npm test --prefix desktop
+npm ci --prefix desktop/tools/lint
+npm run format:check --prefix desktop
+npm run lint --prefix desktop
 ```
 
-The full desktop suite can use a lot of memory. The
-[testing guide](.agents/testing/README.md#bounded-local-node-procedure) shows
-how to run a single test file under a memory limit, which is usually all you
-need while developing. In renderer tests, assert on text, attributes, and
-counts rather than on DOM nodes: a failing assertion on a DOM node can use more
-than a gigabyte of memory while it formats the error.
+`npm run format --prefix desktop` fixes formatting in place. One commit
+reformatted the whole desktop tree; to keep it out of `git blame`, run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
+
+### Pre-commit hooks
+
+`.pre-commit-config.yaml` runs the same Ruff, control-character and desktop
+checks as CI before each commit. With your `.venv` active (it provides the
+pinned Ruff) and the desktop lint package installed:
+
+```bash
+python -m pip install pre-commit
+pre-commit install
+```
 
 ### Documentation changes
 
