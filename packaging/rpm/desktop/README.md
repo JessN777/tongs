@@ -58,6 +58,40 @@ an empty `rpm -V` result. The clean install also binds all seven companion NEVRA
 and their `tongs-final` repository origin. The X11 smoke is a lifecycle check and
 makes no hardware GPU claim.
 
+## Payload compression and reproducible files
+
+Every rebuild sets its binary payload explicitly instead of taking rpm's
+default, single-threaded zstd level 19 (`w19.zstdio`), which spent about 200
+seconds of the hosted lifecycle step writing the two `tongs-desktop` payloads.
+The final RPMs, which are the published ones, and every companion RPM use
+multithreaded zstd at the same level, `w19T0.zstdio`. Once zstd runs with
+workers its output no longer depends on how many there are, so `T0` (one
+worker per CPU) gives the same payload on a 4-vCPU runner and on a 32-core
+workstation. The previous RPMs only seed the upgrade cycle and are never
+published, so they use the much faster `w3T0.zstdio`. `rebuild_one_srpm.sh`
+accepts only those two modes, and `rebuild_srpms.sh` passes one of them to
+each rebuild.
+
+Every rebuild, desktop and companion alike, also passes
+`--define "_buildhost tongs-rpm-builder"` and
+`--define "use_source_date_epoch_as_buildtime 1"`, so two rebuilds of the same
+SRPM give byte-identical RPM files rather than only identical payloads.
+`SOURCE_DATE_EPOCH` comes from the newest `%changelog` entry of the source RPM
+(`source_date_epoch_from_changelog`, which Fedora enables and the scripts
+define explicitly, together with `clamp_mtime_to_source_date_epoch`); every
+Tongs spec template and companion spec carries a changelog entry. The scripts
+clear any inherited `SOURCE_DATE_EPOCH`, so the changelog is its only source,
+and refuse a source RPM without a changelog entry instead of letting rpm fall
+back to the clock. The build time is that epoch, the build host is a fixed
+name instead of the container's random hostname, and file times are clamped
+to the epoch. Each rebuild also uses a fixed `_topdir` instead of a random
+`mktemp` directory, because the compiled `rfc3161-client` companion embeds its
+build paths in its Rust panic locations and its CycloneDX SBOM; each rebuild
+runs in its own disposable container, and the scripts refuse a build root that
+already exists.
+`tests/packaging/rpm/test_rebuild_reproducibility.py` pins the modes and the
+defines.
+
 Local source-level checks do not invoke Podman or RPM tooling:
 
 ```bash

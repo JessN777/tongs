@@ -53,9 +53,15 @@ EOF
         mkdir -p -- "$output_dir/$variant"
         dist=.fc44
         [[ "$variant" == previous ]] && dist='.fc44~previous'
-        rebuild_arguments=()
+        # The final RPMs are the published ones and keep zstd level 19.  The
+        # previous RPMs only seed the upgrade cycle and are never published,
+        # so they take the much faster level 3.
+        rebuild_arguments=(--binary-payload w19T0.zstdio)
+        if [[ "$variant" == previous ]]; then
+            rebuild_arguments=(--binary-payload w3T0.zstdio)
+        fi
         if [[ "$source_name" == tongs-desktop && "$variant" == previous ]]; then
-            rebuild_arguments=(--desktop-version 0.4.9)
+            rebuild_arguments+=(--desktop-version 0.4.9)
         fi
         podman run --rm --network=none --cap-drop=all \
             --security-opt=no-new-privileges \
