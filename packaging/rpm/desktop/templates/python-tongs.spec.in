@@ -79,5 +79,5 @@ test -x %{buildroot}%{_bindir}/tongs-mcp
 %{_bindir}/tongs-mcp
 
 %changelog
-* Tue Sep 08 2026 Tongs release automation <noreply@tongs.tools> - @CORE_RPM_VERSION@-@RPM_RELEASE@
+* @CHANGELOG_DATE@ Tongs release automation <noreply@tongs.tools> - @CORE_RPM_VERSION@-@RPM_RELEASE@
 - Build the source-bound Fedora 44 candidate.
