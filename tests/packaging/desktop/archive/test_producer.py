@@ -9,6 +9,7 @@ import stat
 import struct
 import sys
 import zipfile
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
@@ -306,6 +307,56 @@ def test_missing_required_file_and_wrong_launcher_mode_are_rejected(
 ) -> None:
     with pytest.raises(ArchiveBuildError, match=message):
         build_contract_documents(payload, PARAMETERS, _contract())
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        (
+            lambda files: files | {"runtime/tongs-desktop": (b"tampered", 0o755)},
+            "content disagrees with its declaration",
+        ),
+        (
+            lambda files: files | {"runtime/undeclared": (b"extra", 0o644)},
+            "contains an undeclared file",
+        ),
+        (
+            lambda files: {
+                path: value
+                for path, value in files.items()
+                if path != "runtime/resources/app.asar"
+            },
+            "missing a required root or runtime entry",
+        ),
+    ],
+    ids=["changed-bytes", "undeclared-member", "missing-member"],
+)
+def test_producer_validates_its_own_archive_before_returning_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: Callable[[dict[str, tuple[bytes, int]]], dict[str, tuple[bytes, int]]],
+    message: str,
+) -> None:
+    """An archive that disagrees with its install manifest is never emitted.
+
+    The tampered archive is still recorded consistently in the release
+    manifest and the install manifest still parses, so only the producer's
+    own archive validation can refuse it.
+    """
+
+    build_tar_gzip = producer._build_tar_gzip
+
+    def tampered_tar_gzip(
+        files: dict[str, tuple[bytes, int]], source_date_epoch: int, level: int
+    ) -> bytes:
+        return build_tar_gzip(tamper(dict(files)), source_date_epoch, level)
+
+    monkeypatch.setattr(producer, "_build_tar_gzip", tampered_tar_gzip)
+
+    with pytest.raises(
+        ArchiveBuildError,
+        match=f"generated archive violates the S0 contract: .*{message}",
+    ):
+        build_contract_documents(PAYLOAD, PARAMETERS, _contract())
 
 
 @pytest.mark.parametrize(

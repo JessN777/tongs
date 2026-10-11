@@ -90,10 +90,41 @@ def test_rejects_an_unexpected_consumer_package(
 def test_rejects_a_missing_exact_companion(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rpm_dir, output_dir, _ = _fixture(tmp_path, monkeypatch)
-    (rpm_dir / "companion-0.rpm").unlink()
+    rpm_dir, output_dir, by_path = _fixture(tmp_path, monkeypatch)
+    missing = by_path[rpm_dir / "companion-3.rpm"]
+    (rpm_dir / "companion-3.rpm").unlink()
 
-    with pytest.raises(ValueError, match="missing"):
+    with pytest.raises(ValueError) as exc_info:
+        selector.select(
+            DEPENDENCY_MANIFEST, rpm_dir, output_dir, tmp_path / "report.json"
+        )
+
+    # The error names the one absent identity, and nothing is published.
+    assert f"missing=[{missing!r}]" in str(exc_info.value)
+    assert "unexpected=[]" in str(exc_info.value)
+    assert list(output_dir.iterdir()) == []
+    assert not (tmp_path / "report.json").exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "python3-debugpy",
+        "python3-debuginfod-client",
+        "python3-sigstore-debugsource-helper",
+    ],
+)
+def test_debug_exclusion_matches_only_the_debug_package_suffix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    rpm_dir, output_dir, by_path = _fixture(tmp_path, monkeypatch)
+    lookalike = rpm_dir / f"{name}.rpm"
+    lookalike.write_bytes(name.encode())
+    by_path[lookalike] = f"{name}|0|1.0|1.fc44|noarch"
+
+    # A package whose name merely contains ``debug`` is not a debug package:
+    # it must surface as unexpected instead of being silently excluded.
+    with pytest.raises(ValueError, match=f"unexpected=.*'{name}\\|"):
         selector.select(
             DEPENDENCY_MANIFEST, rpm_dir, output_dir, tmp_path / "report.json"
         )

@@ -177,6 +177,32 @@ def test_inventory_tracks_private_cache_directory_but_not_shared_directory(
     ]
 
 
+def test_inventory_owns_only_tongs_distribution_directories(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    abi = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    purelib = f"/usr/lib/{abi}/site-packages"
+    owned = f"{purelib}/tongs-1.1.0.dist-info"
+    records = [
+        {"path": owned, "mode": "drwxr-xr-x"},
+        # Another distribution whose name only starts with ``tongs``.
+        {"path": f"{purelib}/tongsfoo-1.0.dist-info", "mode": "drwxr-xr-x"},
+        {"path": f"{purelib}/tongs_other", "mode": "drwxr-xr-x"},
+    ]
+    monkeypatch.setattr(verify_rpm_state, "_rpm_purelib", lambda: purelib)
+    monkeypatch.setattr(
+        verify_rpm_state, "_package_file_records", lambda _name: records
+    )
+    output = tmp_path / "inventory.json"
+
+    verify_rpm_state.write_inventory(["python3-tongs"], output)
+
+    inventory = verify_rpm_state.json.loads(output.read_text())
+    assert inventory["paths"] == [
+        {"package": "python3-tongs", "path": owned, "type": "directory"}
+    ]
+
+
 def test_metadata_requires_test_plugin_private_cache_directory() -> None:
     abi = f"python{sys.version_info.major}.{sys.version_info.minor}"
     purelib = f"/usr/lib/{abi}/site-packages"

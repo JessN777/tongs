@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).parents[4]
 PACKAGING = ROOT / "packaging" / "rpm" / "desktop"
 
@@ -284,25 +286,17 @@ retain_verifier_python
     assert changed_nevra.returncode == 1
 
 
-def test_dependency_negative_forces_dnf5_to_reject_retained_broken_update(
-    tmp_path: Path,
-) -> None:
+def _run_dependency_negative_stage(
+    evidence_dir: Path, dnf_log: Path
+) -> subprocess.CompletedProcess[str]:
+    """Replay the installer's dependency-negative stage with ``dnf_log`` as DNF output."""
+
     installer = (PACKAGING / "install_and_verify.sh").read_text()
     marker = '"$evidence_dir/dnf-failed-upgrade.log"'
     marker_index = installer.index(marker)
     stage_start = installer.rindex("set +e\n", 0, marker_index)
     stage_end = installer.index("\nassert_sentinels dependency-failure", marker_index)
     stage = installer[stage_start:stage_end]
-    retained = (
-        Path(__file__).with_name("fixtures") / "dnf-failed-upgrade-807d29e.log"
-    ).read_bytes()
-    assert hashlib.sha256(retained).hexdigest() == (
-        "f64d7a16871df211625950a3e3fe8a6767455cb9151396af284c2d6fe7d4223f"
-    )
-    assert b"nothing provides python3-tongs = " in retained
-    assert b"Skipping packages with broken dependencies:" in retained
-    assert retained.endswith(b"Nothing to do.\n")
-
     script = (
         """
 set -e
@@ -331,25 +325,135 @@ rpm() {
 """
         + stage
     )
-    result = subprocess.run(
+    return subprocess.run(
         ["bash", "-c", script],
         env={
             **os.environ,
-            "EVIDENCE_DIR": str(tmp_path),
-            "RETAINED_LOG": str(
-                Path(__file__).with_name("fixtures") / "dnf-failed-upgrade-807d29e.log"
-            ),
+            "EVIDENCE_DIR": str(evidence_dir),
+            "RETAINED_LOG": str(dnf_log),
         },
         text=True,
         check=False,
         capture_output=True,
     )
 
+
+def test_dependency_negative_forces_dnf5_to_reject_retained_broken_update(
+    tmp_path: Path,
+) -> None:
+    retained_log = (
+        Path(__file__).with_name("fixtures") / "dnf-failed-upgrade-807d29e.log"
+    )
+    retained = retained_log.read_bytes()
+    assert hashlib.sha256(retained).hexdigest() == (
+        "f64d7a16871df211625950a3e3fe8a6767455cb9151396af284c2d6fe7d4223f"
+    )
+    assert b"nothing provides python3-tongs = " in retained
+    assert b"Skipping packages with broken dependencies:" in retained
+    assert retained.endswith(b"Nothing to do.\n")
+
+    result = _run_dependency_negative_stage(tmp_path, retained_log)
+
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "dnf-failed-upgrade.log").read_bytes() == retained
     assert (tmp_path / "exact-dependency-negative-classification.txt").read_text() == (
         "rpm -K: candidate integrity accepted\ndnf: exact core dependency rejection\n"
     )
+
+
+def test_dependency_negative_classifies_a_bare_nothing_provides_failure(
+    tmp_path: Path,
+) -> None:
+    # Only the "nothing provides" line names the dependency failure here: the
+    # retained log also says "cannot install", so it alone cannot pin the
+    # pattern.
+    dnf_log = tmp_path / "nothing-provides.log"
+    dnf_log.write_text(
+        "Failed to resolve the transaction:\n"
+        " - nothing provides python3-tongs = 1.1.0-1.fc44 needed by "
+        "tongs-desktop-1.1.0-1.fc44.x86_64 from @commandline\n"
+    )
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+
+    result = _run_dependency_negative_stage(evidence_dir, dnf_log)
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        evidence_dir / "exact-dependency-negative-classification.txt"
+    ).read_text() == (
+        "rpm -K: candidate integrity accepted\ndnf: exact core dependency rejection\n"
+    )
+
+
+def test_dependency_negative_refuses_an_unrelated_dnf_failure(tmp_path: Path) -> None:
+    dnf_log = tmp_path / "download-failure.log"
+    dnf_log.write_text(
+        "Failed to download packages:\n"
+        " - Curl error (6): Could not resolve host: mirrors.fedoraproject.org\n"
+    )
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+
+    result = _run_dependency_negative_stage(evidence_dir, dnf_log)
+
+    assert result.returncode != 0
+    assert not (evidence_dir / "exact-dependency-negative-classification.txt").exists()
+
+
+def _run_verifier_reason_check(
+    tmp_path: Path, reason: bytes
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run ``assert_verifier_python_user_reason`` on one recorded DNF reason."""
+
+    installer = (PACKAGING / "install_and_verify.sh").read_text()
+    function_start = installer.index("assert_verifier_python_user_reason() {")
+    function_end = installer.index("\nassert_verifier_python() {", function_start)
+    reason_path = tmp_path / "reason.txt"
+    reason_path.write_bytes(reason)
+    normalized = tmp_path / "reason-normalized.txt"
+    script = (
+        installer[function_start:function_end]
+        + '\nassert_verifier_python_user_reason "$REASON" "$NORMALIZED"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "REASON": str(reason_path), "NORMALIZED": str(normalized)},
+        text=True,
+        check=False,
+        capture_output=True,
+    )
+    return result, normalized
+
+
+@pytest.mark.parametrize(
+    "reason", [b"abc;def\n", b"User;id\n", b"User$(id)\n", b"user1\n", b"-user\n"]
+)
+def test_verifier_reason_must_be_one_ascii_word(tmp_path: Path, reason: bytes) -> None:
+    result, normalized = _run_verifier_reason_check(tmp_path, reason)
+
+    assert result.returncode == 1
+    assert result.stderr == "lifecycle verifier Python reason is not an ASCII word\n"
+    assert not normalized.exists()
+
+
+def test_verifier_reason_word_is_normalized_before_the_user_check(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "accepted").mkdir()
+    accepted, accepted_normalized = _run_verifier_reason_check(
+        tmp_path / "accepted", b"USER\n"
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted_normalized.read_text() == "user\n"
+
+    (tmp_path / "rejected").mkdir()
+    rejected, rejected_normalized = _run_verifier_reason_check(
+        tmp_path / "rejected", b"Dependency\n"
+    )
+    assert rejected.returncode == 1
+    assert rejected.stderr == "lifecycle verifier Python reason is not user\n"
+    assert rejected_normalized.read_text() == "dependency\n"
 
 
 def test_hosted_smoke_executes_complete_retained_validation_path(
