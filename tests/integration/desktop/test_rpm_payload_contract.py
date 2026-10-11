@@ -266,6 +266,24 @@ def test_rejects_an_archive_that_disagrees_with_the_producer_checksums(
         _materialize(archive_dir, tmp_path / "contract.json")
 
 
+def test_rejects_an_empty_archive_the_checksums_agree_with(
+    archive_dir: Path, tmp_path: Path
+) -> None:
+    filename = _base()["accepted_desktop"]["archive"]["filename"]
+    (archive_dir / filename).write_bytes(b"")
+    empty_digest = hashlib.sha256(b"").hexdigest()
+    lines = [
+        f"{empty_digest}  {filename}" if line.endswith(f"  {filename}") else line
+        for line in (archive_dir / CHECKSUM_FILE_NAME).read_text().splitlines()
+    ]
+    assert f"{empty_digest}  {filename}" in lines
+    (archive_dir / CHECKSUM_FILE_NAME).write_text("\n".join(lines) + "\n")
+    output = tmp_path / "contract.json"
+    with pytest.raises(PayloadContractError, match="desktop archive is empty"):
+        _materialize(archive_dir, output)
+    assert not output.exists()
+
+
 def test_rejects_an_incomplete_producer_checksum_list(
     archive_dir: Path, tmp_path: Path
 ) -> None:

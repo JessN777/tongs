@@ -1262,3 +1262,95 @@ def test_cli_failure_is_nonzero_and_leaves_no_published_receipt(
 
     assert ADAPTER.main(_cli_arguments(case, "produce")) == 1
     assert not case["output"].exists()
+
+
+def test_failed_produce_removes_its_populated_temporary_directory(
+    case: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure after staging leaves neither the output nor its staging tree."""
+
+    staged: list[Path] = []
+    original = ADAPTER.consume_archive_evidence
+
+    def consume_then_fail(**arguments: object) -> object:
+        root = Path(arguments["evidence_root"])
+        staged.append(root)
+        original(**arguments)
+        assert (root / ADAPTER.RECEIPT_PATH).is_file()
+        raise ADAPTER.ArchiveEvidenceError("forced failure after staging")
+
+    monkeypatch.setattr(ADAPTER, "consume_archive_evidence", consume_then_fail)
+
+    with pytest.raises(ADAPTER.ArchiveEvidenceError, match="forced failure"):
+        _produce(case)
+    output = case["output"]
+    assert len(staged) == 1
+    assert staged[0].parent == output.parent
+    assert staged[0].name.startswith(f".{output.name}.")
+    assert not staged[0].exists()
+    assert not output.exists()
+    assert sorted(output.parent.glob(f".{output.name}.*")) == []
+
+
+def _stage_extra_input(output: Path, relative: str) -> dict[str, str]:
+    payload = b'{"extra": true}\n'
+    target = output / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    return {"path": relative, "sha256": _digest(payload)}
+
+
+@pytest.mark.parametrize("mutation", ["extra", "replaced"])
+def test_consumer_requires_the_transfer_manifest_as_the_only_input(
+    case: dict[str, object], mutation: str
+) -> None:
+    _produce(case)
+    output = case["output"]
+    receipt_path = output / ADAPTER.RECEIPT_PATH
+    receipt = json.loads(receipt_path.read_bytes())
+    assert [item["path"] for item in receipt["inputs"]] == [
+        ADAPTER.TRANSFER_MANIFEST_PATH
+    ]
+    extra = _stage_extra_input(output, "inputs/extra-input.json")
+    if mutation == "extra":
+        receipt["inputs"].append(extra)
+    else:
+        receipt["inputs"] = [extra]
+    receipt_path.write_bytes(canonical_json(receipt))
+
+    with pytest.raises(ADAPTER.ArchiveEvidenceError, match="input declarations"):
+        _consume(case)
+
+
+def test_duplicate_producer_input_cannot_override_the_first(
+    case: dict[str, object],
+) -> None:
+    """A second ``TONGS_HEAD_SHA`` is ambiguous, never a silent override."""
+
+    path = case["transfer"] / "evidence/inputs.env"
+    original = path.read_bytes()
+    assert original.count(b"TONGS_HEAD_SHA=") == 1
+    path.write_bytes(original + b"TONGS_HEAD_SHA=" + b"f" * 40 + b"\n")
+    _seal(case["transfer"], case["expectations"])
+
+    with pytest.raises(
+        ADAPTER.ArchiveEvidenceError, match="retained transfer validation failed"
+    ) as raised:
+        _produce(case)
+    assert "inputs.env is ambiguous" in str(raised.value.__cause__)
+    assert not case["output"].exists()
+
+
+def test_adapter_input_parser_rejects_a_duplicate_key_on_its_own(
+    case: dict[str, object],
+) -> None:
+    """The adapter does not rely on the upstream validator to refuse a repeat."""
+
+    document = (case["transfer"] / "evidence/inputs.env").read_bytes()
+    parsed = ADAPTER._parse_inputs(document)
+    assert parsed["TONGS_HEAD_SHA"] == case["expectations"].source_commit
+
+    with pytest.raises(
+        ADAPTER.ArchiveEvidenceError, match="producer inputs are ambiguous"
+    ):
+        ADAPTER._parse_inputs(document + b"TONGS_HEAD_SHA=" + b"f" * 40 + b"\n")
