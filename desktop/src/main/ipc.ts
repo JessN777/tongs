@@ -465,13 +465,6 @@ const SAFE_REVIEW_ERROR_CODES = new Set([
   "unsupported",
   "write_failed",
 ]);
-const UNCERTAIN_REVIEW_ERROR_CODES = new Set([
-  "invalid_response",
-  "mutation_timeout",
-  "request_cancelled",
-  "unexpected_eof",
-  "write_failed",
-]);
 
 function safeReviewMutationError(error: unknown): {
   readonly code: string;

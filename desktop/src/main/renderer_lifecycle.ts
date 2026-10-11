@@ -19,8 +19,7 @@ export class RendererRecoveryCoordinator {
     this.#requested += 1;
     if (!this.#active) {
       const task = this.#drain();
-      let owned: Promise<void>;
-      owned = task.finally(() => {
+      const owned: Promise<void> = task.finally(() => {
         if (this.#active === owned) this.#active = null;
       });
       this.#active = owned;
@@ -128,8 +127,7 @@ export class ServiceRecoveryPolicy {
     if (this.#state === "failed" || this.#options.shuttingDown()) {
       return Promise.resolve();
     }
-    let owned: Promise<void>;
-    owned = this.#run().finally(() => {
+    const owned: Promise<void> = this.#run().finally(() => {
       if (this.#active === owned) this.#active = null;
     });
     this.#active = owned;
@@ -152,7 +150,7 @@ export class ServiceRecoveryPolicy {
       this.#setState("restarting");
       // Let the transport finish its own exit bookkeeping before restarting it.
       await Promise.resolve();
-      let connected = false;
+      let connected: boolean;
       try {
         connected = await this.#options.restart();
       } catch {

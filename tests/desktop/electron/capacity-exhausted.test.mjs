@@ -103,14 +103,8 @@ test("every desktop error code map that lists shutdown_failed also lists capacit
     );
   }
   const ipc = maps.find(({ file }) => file === "main/ipc.ts").text;
-  const reviewCodes = ipc.slice(
-    ipc.indexOf("const SAFE_REVIEW_ERROR_CODES"),
-    ipc.indexOf("const UNCERTAIN_REVIEW_ERROR_CODES"),
-  );
-  assert.equal(reviewCodes.includes('"capacity_exhausted"'), true);
-  const uncertainCodes = ipc.slice(
-    ipc.indexOf("const UNCERTAIN_REVIEW_ERROR_CODES"),
-    ipc.indexOf("function safeReviewMutationError"),
-  );
-  assert.equal(uncertainCodes.includes("capacity_exhausted"), false);
+  const start = ipc.indexOf("const SAFE_REVIEW_ERROR_CODES");
+  const end = ipc.indexOf("function safeReviewMutationError");
+  assert.equal(start > 0 && end > start, true);
+  assert.equal(ipc.slice(start, end).includes('"capacity_exhausted"'), true);
 });

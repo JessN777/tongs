@@ -156,6 +156,7 @@ const spawnSidecar: SpawnChild = (executable, args, options) =>
  * embeddings, overrides and isolates.
  */
 const UNSAFE_LOG_CHARACTERS =
+  // eslint-disable-next-line no-control-regex -- this pattern matches control characters on purpose.
   /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
 /** Receives one line of the service's diagnostics, already bounded and prefixed. */

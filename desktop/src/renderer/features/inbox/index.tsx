@@ -1288,7 +1288,7 @@ export function sortReviewItems(
   sorted.sort((left, right) => {
     const leftSummary = left.summary;
     const rightSummary = right.summary;
-    let order = 0;
+    let order: number;
     if (sort === "title")
       order = leftSummary.title.localeCompare(rightSummary.title, undefined, {
         sensitivity: "base",

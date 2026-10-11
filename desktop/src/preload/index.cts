@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } =
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- the sandboxed preload is CommonJS and loads electron with require.
   require("electron") as typeof import("electron");
 import type {
   AcceptedResult,

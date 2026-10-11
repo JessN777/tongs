@@ -29,7 +29,6 @@ import {
   reviewMutationError,
   useInlineReviewComposer,
   type InlineComposerBridge,
-  type InlineComposerController,
 } from "./composer.js";
 import { reviewDrawerIsOpen, useReviewKeyMap } from "./keys.js";
 import {
@@ -1694,9 +1693,11 @@ function SubmissionProgress({
                     reconcile("retry_remaining");
                     return;
                   }
-                  confirmation === "reconcile:retry_remaining"
-                    ? reconcile("retry_remaining")
-                    : setConfirmation("reconcile:retry_remaining");
+                  if (confirmation === "reconcile:retry_remaining") {
+                    reconcile("retry_remaining");
+                  } else {
+                    setConfirmation("reconcile:retry_remaining");
+                  }
                 }}
               >
                 {progress.unknown_step_ids.length > 0 &&

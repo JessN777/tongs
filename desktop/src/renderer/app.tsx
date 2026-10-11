@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ErrorInfo,
   type ReactNode,
 } from "react";
 import { createRoot } from "react-dom/client";
@@ -251,7 +250,7 @@ export class ErrorBoundary extends Component<
   static getDerivedStateFromError(): { readonly failed: boolean } {
     return { failed: true };
   }
-  componentDidCatch(error: Error, _info: ErrorInfo): void {
+  componentDidCatch(error: Error): void {
     console.error(safeError(error));
   }
   #retry = (): void => {

@@ -220,6 +220,7 @@ export function assertResult(
   try {
     assertResultValue(method, value);
   } catch (error) {
+    // eslint-disable-next-line preserve-caught-error -- the message carries a bounded detail; the unbounded original stays out of logs.
     throw new Error(`Invalid ${method} result: ${detailOf(error)}`);
   }
 }

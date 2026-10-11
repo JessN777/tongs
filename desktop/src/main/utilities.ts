@@ -306,7 +306,7 @@ export class WorkspaceUtilities {
         );
       }
     }
-    let root: Stats | null = null;
+    let root: Stats | null;
     try {
       root = await lstat(this.exportRoot);
     } catch {

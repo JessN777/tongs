@@ -244,7 +244,7 @@ export class CILookups {
     let outcome: {
       readonly status: CIStatusValue;
       readonly wait: number | null;
-    } | null = null;
+    } | null;
     try {
       const read = this.bridge.getReviewCIStatus(
         this.fresh.has(handle)

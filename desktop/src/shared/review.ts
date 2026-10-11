@@ -303,7 +303,7 @@ export interface SaveDraftParams extends GetDraftParams {
 export interface DiscardDraftParams extends GetDraftParams {
   readonly expected_version: number;
 }
-export interface StartSubmissionParams extends DiscardDraftParams {}
+export type StartSubmissionParams = DiscardDraftParams;
 export interface AttemptParams extends ReviewOnlyParams {
   readonly attempt_id: string;
 }
