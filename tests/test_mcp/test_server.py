@@ -7,10 +7,12 @@ the plain functions in ``test_tools.py``.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import NoReturn
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -329,6 +331,31 @@ class TestLifecycle:
         with pytest.raises(ServiceError) as caught:
             session.issued_repositories  # noqa: B018
         assert caught.value.code is ServiceErrorCode.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_shutdown_after_failed_cleanup_closes_every_store(
+        self, holder, caplog
+    ) -> None:
+        # A store left open keeps its aiosqlite worker thread, which is not a
+        # daemon thread, so tongs-mcp would not exit after it stops (#442).
+        before = set(threading.enumerate())
+        async with create_connected_server_and_client_session(server.mcp):
+            session = await holder.get()
+            workers = [
+                thread
+                for thread in set(threading.enumerate()) - before
+                if "_connection_worker_thread" in thread.name
+            ]
+            assert len(workers) == 2
+            session.review_submissions.close = AsyncMock(  # type: ignore[method-assign]
+                side_effect=RuntimeError("review submission tasks did not stop")
+            )
+
+        assert holder.current is None
+        for thread in workers:
+            await asyncio.to_thread(thread.join, 5)
+        assert [thread.is_alive() for thread in workers] == [False, False]
+        assert "did not close cleanly" in caplog.text
 
     @pytest.mark.asyncio
     async def test_client_reads_tool_errors(self, holder, forbid_token_lookup) -> None:

@@ -521,7 +521,7 @@ class _EOFSession(_Session):
     async def start(self) -> _EOFSession:
         return self
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         await self.ci_mutations.close()
 
     async def events(self) -> AsyncIterator[ServiceEvent]:

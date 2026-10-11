@@ -40,7 +40,7 @@ class _ConfigSession:
     async def start(self) -> _ConfigSession:
         return self
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         return None
 
 
