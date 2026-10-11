@@ -103,14 +103,14 @@ mutating widget internals where possible.
 
 ## Production desktop checks
 
-The production package is top-level `desktop/`. Install and run the production
-suite with the checkout's Python interpreter:
-
-```bash
-npm ci --prefix desktop
-npm run build --prefix desktop
-TONGS_TEST_PYTHON="$(command -v python)" npm test --prefix desktop
-```
+The production package is top-level `desktop/`. Install it with
+`npm ci --prefix desktop` and run the production suite with the checkout's
+Python interpreter,
+`TONGS_TEST_PYTHON="$(command -v python)" npm test --prefix desktop`, only
+inside the [bounded local Node procedure](#bounded-local-node-procedure), one
+guarded unit at a time; replace the example's build and focused run with the
+full command. The `test` script passes `--test-concurrency=1`, so its test
+files run one after another.
 
 The build script prepares assets, runs TypeScript checking, and creates build
 output. The test script repeats that build before Electron main and React

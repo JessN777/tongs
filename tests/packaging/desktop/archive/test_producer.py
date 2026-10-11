@@ -510,3 +510,23 @@ def test_production_npm_licenses_reject_linked_package_paths(tmp_path: Path) -> 
 
     with pytest.raises(ArchiveBuildError, match="path is not a directory"):
         producer._production_npm_licenses(desktop)
+
+
+def test_the_desktop_lint_package_is_never_an_archive_input() -> None:
+    """The formatter and linter package under desktop/tools/lint, with its own
+    TypeScript, stays out of the archive: the source inventory, the build
+    toolchain record and the ASAR allowlist name desktop paths explicitly."""
+
+    lint = ROOT / "desktop/tools/lint"
+    assert (lint / "package.json").is_file()
+    for relative in producer._SOURCE_INPUTS:
+        source = ROOT / relative
+        assert not lint.is_relative_to(source), relative
+        assert not source.is_relative_to(lint), relative
+    paths = [entry["path"] for entry in producer._source_inventory(ROOT)]
+    assert "desktop/package.json" in paths
+    assert "desktop/src/renderer/app.tsx" in paths
+    assert [path for path in paths if path.startswith("desktop/tools/")] == []
+    allowlist = (ROOT / "packaging/desktop/archive/app-asar-paths.txt").read_text()
+    assert "tools/" not in allowlist
+    assert _contract()["toolchain"]["typescript"].startswith("7.")

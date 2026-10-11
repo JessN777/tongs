@@ -1,0 +1,5 @@
+# Prettier formats the desktop sources with its default options. npm writes
+# the lockfiles, and the archive pins desktop/package-lock.json's digest.
+dist/
+node_modules/
+package-lock.json

@@ -30,6 +30,16 @@ function preloadGroup(name) {
   return Object.fromEntries(entries.map(([, key, value]) => [key, value]));
 }
 
+// Compares code without its layout, so a formatter's line breaks and
+// trailing commas never decide a contract check.
+function squash(source) {
+  return source.replace(/\s+/g, "").replace(/,([)\]}])/g, "$1");
+}
+
+function assertExposes(expected) {
+  assert.equal(squash(preload).includes(squash(expected)), true, expected);
+}
+
 function channelLiterals(source) {
   return [...source.matchAll(/["'`](tongs:[^"'`]*)["'`]/g)].map((match) => match[1]);
 }
@@ -52,8 +62,12 @@ test("the preload's tongs: literals are exactly the shared channel names", () =>
 test("the preload exposes the diff context and generation channels", () => {
   assert.equal(preloadGroup("IPC_CHANNELS").getDiffContext, "tongs:diff.context");
   assert.equal(preloadGroup("IPC_CHANNELS").generateDiff, "tongs:diff.generate");
-  assert.match(preload, /getDiffContext: \(params: DiffContextParams\): DesktopRead<DiffContextResult> => read\(IPC_CHANNELS\.getDiffContext, params\)/);
-  assert.match(preload, /generateDiff: \(params: GenerateDiffParams\): DesktopRead<GenerateDiffResult> => read\(IPC_CHANNELS\.generateDiff, params\)/);
+  assertExposes(
+    "getDiffContext: (params: DiffContextParams): DesktopRead<DiffContextResult> => read(IPC_CHANNELS.getDiffContext, params)",
+  );
+  assertExposes(
+    "generateDiff: (params: GenerateDiffParams): DesktopRead<GenerateDiffResult> => read(IPC_CHANNELS.generateDiff, params)",
+  );
 });
 
 test("the preload exposes the colour scheme channels and nothing broader", () => {
@@ -61,8 +75,12 @@ test("the preload exposes the colour scheme channels and nothing broader", () =>
   assert.equal(channels.getAppearance, "tongs:appearance.get");
   assert.equal(channels.setColorScheme, "tongs:appearance.set-color-scheme");
   assert.equal(channels.appearance, "tongs:appearance");
-  assert.match(preload, /getAppearance: async \(\): Promise<AppearanceDto> => ipcRenderer\.invoke\(IPC_CHANNELS\.getAppearance\) as Promise<AppearanceDto>/);
-  assert.match(preload, /setColorScheme: async \(choice: ColorScheme\): Promise<AppearanceDto> => ipcRenderer\.invoke\(IPC_CHANNELS\.setColorScheme, choice\) as Promise<AppearanceDto>/);
-  assert.match(preload, /ipcRenderer\.on\(IPC_CHANNELS\.appearance, wrapped\)/);
-  assert.match(preload, /ipcRenderer\.removeListener\(IPC_CHANNELS\.appearance, wrapped\)/);
+  assertExposes(
+    "getAppearance: async (): Promise<AppearanceDto> => ipcRenderer.invoke(IPC_CHANNELS.getAppearance) as Promise<AppearanceDto>",
+  );
+  assertExposes(
+    "setColorScheme: async (choice: ColorScheme): Promise<AppearanceDto> => ipcRenderer.invoke(IPC_CHANNELS.setColorScheme, choice) as Promise<AppearanceDto>",
+  );
+  assertExposes("ipcRenderer.on(IPC_CHANNELS.appearance, wrapped)");
+  assertExposes("ipcRenderer.removeListener(IPC_CHANNELS.appearance, wrapped)");
 });

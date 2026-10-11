@@ -11,7 +11,10 @@
     "clean": "node scripts/build.mjs --clean",
     "build": "node scripts/build.mjs --prepare && tsc -p tsconfig.json && node scripts/build.mjs",
     "test": "npm run build && node --test --test-concurrency=1 --import ../tests/desktop/renderer/setup.mjs ../tests/desktop/electron/*.test.mjs ../tests/desktop/renderer/*.test.mjs",
-    "start": "npm run build && electron ."
+    "start": "npm run build && electron .",
+    "format": "npm --prefix tools/lint run format",
+    "format:check": "npm --prefix tools/lint run format:check",
+    "lint": "npm --prefix tools/lint run lint"
   },
   "devDependencies": {
     "@electron/asar": "4.3.1",

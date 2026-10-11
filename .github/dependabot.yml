@@ -62,3 +62,24 @@ updates:
         update-types: [minor, patch]
       npm-major:
         update-types: [major]
+
+  # The desktop formatter and linter (Prettier, ESLint and typescript-eslint)
+  # install exactly from desktop/tools/lint/package-lock.json, apart from the
+  # app's own toolchain.  typescript-eslint parses with a TypeScript it
+  # supports, older than the app's, so TypeScript here takes patch updates
+  # only and moves to a newer minor or major by hand once typescript-eslint's
+  # peer range allows it.
+  - package-ecosystem: npm
+    directory: /desktop/tools/lint
+    versioning-strategy: increase
+    schedule:
+      interval: monthly
+    labels: []
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+    groups:
+      desktop-lint:
+        update-types: [minor, patch]
+      desktop-lint-major:
+        update-types: [major]
