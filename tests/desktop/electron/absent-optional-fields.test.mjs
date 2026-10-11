@@ -344,20 +344,21 @@ function commitsResult(overrides = {}) {
 }
 
 // Each read and the fields a forge may leave out, which the sidecar sends as
-// null (#184). Every other text field of these rows stays required.
+// null (#184; a workflow run's branch, #443). Every other text field of these
+// rows stays required.
 const OPTIONAL_TEXT = [
-  ["review_pipelines.list", pipelinesResult, ["source", "web_url"]],
-  ["pipelines.list", pipelinesResult, ["source", "web_url"]],
+  ["review_pipelines.list", pipelinesResult, ["ref", "source", "web_url"]],
+  ["pipelines.list", pipelinesResult, ["ref", "source", "web_url"]],
   ["jobs.list", jobsResult, ["stage", "web_url"]],
   ["commits.list", commitsResult, ["web_url"]],
 ];
 const REQUIRED_TEXT = [
-  ["pipelines.list", pipelinesResult, ["status", "ref", "sha"]],
+  ["pipelines.list", pipelinesResult, ["status", "sha"]],
   ["jobs.list", jobsResult, ["name", "status"]],
   ["commits.list", commitsResult, ["sha", "short_sha", "title", "message"]],
 ];
 
-test("a pipeline with no source and a job with no stage pass the read boundary", () => {
+test("a pipeline with no branch or source and a job with no stage pass the read boundary", () => {
   for (const [method, result, fields] of OPTIONAL_TEXT) {
     assertResult(method, result());
     assertResult(

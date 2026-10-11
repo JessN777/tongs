@@ -7,7 +7,8 @@ that to null on the wire.  These tests pin both known instances: the language of
 a file with no detected lexer, and the inline position of a review-level note.
 The CI and commit projections follow the same rule for the fields a forge may
 omit (#184): a pipeline's link and source, a job's stage and link, a commit's
-link and a review's merge status.
+link and a review's merge status.  A GitHub workflow run may also have no branch
+(#443), so a pipeline's ref follows the same rule.
 
 The same shapes cover the metadata GitHub's files endpoint withholds.  The
 sidecar derives the shapes that endpoint's remaining fields determine and leaves
@@ -404,11 +405,57 @@ async def test_pipeline_without_a_source_or_link_projects_nulls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_github_run_without_a_branch_projects_a_null_ref() -> None:
+    """GitHub sends ``head_branch: null`` for some tag and fork runs (#443).
+
+    The validator required a non-empty ref, so one such run made the client
+    reject the whole pipeline list.  The run now reads with only its ref absent.
+    """
+    client = _github_client()
+    runs = (
+        client._parse_workflow_run(
+            {
+                "id": 1,
+                "status": "completed",
+                "conclusion": "success",
+                "head_branch": None,
+                "head_sha": "abc123",
+                "event": "push",
+                "html_url": "https://github.com/acme/repo/actions/runs/1",
+            }
+        ),
+        client._parse_workflow_run(
+            {"id": 2, "status": "queued", "head_branch": "main", "head_sha": "def456"}
+        ),
+    )
+    server = DesktopSidecarServer(session=cast(object, _CISession(pipelines=runs)))
+    review = server._handles.issue(HandleKind.REVIEW, _REVIEW)
+    repository = server._handles.issue(HandleKind.REPOSITORY, _REVIEW.repository)
+
+    for result in (
+        await server._review_pipelines_list({"review": review}, _context()),
+        await server._pipelines_list({"repository": repository}, _context()),
+    ):
+        branchless, named = _values(result, "pipelines")
+        assert (branchless["id"], branchless["ref"], branchless["sha"]) == (
+            1,
+            None,
+            "abc123",
+        )
+        assert (branchless["source"], branchless["web_url"]) == (
+            "push",
+            "https://github.com/acme/repo/actions/runs/1",
+        )
+        assert (named["id"], named["ref"], named["sha"]) == (2, "main", "def456")
+
+
+@pytest.mark.asyncio
 async def test_required_ci_text_is_never_turned_into_null() -> None:
     """Only the declared optional fields change; a broken required value stays.
 
     Mapping every empty text to null would hide a contract break the client is
-    meant to catch, so an empty job name or pipeline ref reaches it unchanged.
+    meant to catch, so an empty job name or pipeline sha reaches it unchanged.
+    A pipeline ref is optional (#443), so its empty text becomes null.
     """
     session = _CISession(
         pipelines=(Pipeline(1, CIStatus.PENDING, "", "", "", ""),),
@@ -429,7 +476,7 @@ async def test_required_ci_text_is_never_turned_into_null() -> None:
     )
 
     assert (run["ref"], run["sha"], run["web_url"], run["source"]) == (
-        "",
+        None,
         "",
         None,
         None,

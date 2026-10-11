@@ -2140,6 +2140,18 @@ class TestAbsentOptionalText:
         assert (run.web_url, run.source) == ("", "")
         assert (run.ref, run.sha) == ("main", "abc123")
 
+    def test_run_without_a_branch_keeps_text(self) -> None:
+        """A tag or fork run may have ``head_branch: null`` (#443)."""
+        client, _ = _make_github_client(lambda _: httpx.Response(200))
+
+        null_branch = client._parse_workflow_run(
+            {"id": 1, "status": "queued", "head_branch": None, "head_sha": None}
+        )
+        missing = client._parse_workflow_run({"id": 2, "status": "queued"})
+
+        for run in (null_branch, missing):
+            assert (run.ref, run.sha, run.web_url, run.source) == ("", "", "", "")
+
     def test_detail_without_merge_state(self) -> None:
         client, _ = _make_github_client(lambda _: httpx.Response(200))
 

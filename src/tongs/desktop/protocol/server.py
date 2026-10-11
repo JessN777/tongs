@@ -2256,7 +2256,7 @@ def _detail_wire(snapshot: ReviewSnapshot) -> JsonObject:
 # empty string, so one missing value cannot make the client refuse a whole list.
 # Fields not named here are required and keep whatever the core holds, so a
 # broken required value still fails loudly at the client boundary.
-_PIPELINE_OPTIONAL_TEXT = frozenset({"web_url", "source"})
+_PIPELINE_OPTIONAL_TEXT = frozenset({"ref", "web_url", "source"})
 _JOB_OPTIONAL_TEXT = frozenset({"stage", "web_url"})
 _COMMIT_OPTIONAL_TEXT = frozenset({"web_url"})
 
