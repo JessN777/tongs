@@ -230,6 +230,36 @@ test("a pipeline and job the forge left partly blank still render", async () => 
   assert.deepEqual(opened, []);
 });
 
+test("a workflow run without a branch renders without a ref (#443)", async () => {
+  const bare = pipeline(101);
+  const bridge = baseBridge({
+    listReviewPipelines: () =>
+      read({
+        pipelines: [{ ...bare, value: { ...bare.value, ref: null } }, pipeline(102)],
+      }),
+  });
+  const view = renderFeature(bridge);
+  await view.findByText("build-201");
+
+  const rows = [...view.container.querySelectorAll(".ci-pipeline-list .ci-pipeline")];
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => row.querySelectorAll("span").length),
+    [1, 2],
+  );
+  assert.equal(rows[0].textContent.includes("branch-101"), false);
+  assert.equal(rows[1].textContent.includes("branch-102"), true);
+  const meta = view.container.querySelector(".ci-summary .ci-meta").textContent;
+  assert.equal(meta.startsWith("push · "), true);
+  assert.equal(meta.split(" · ").length, 2);
+
+  fireEvent.click(view.getByRole("button", { name: "Retry pipeline" }));
+  const prompt = view.getByRole("alertdialog").textContent;
+  assert.equal(prompt.includes("pipeline #101. This sends"), true);
+  assert.equal(prompt.includes(" on "), false);
+  assert.equal(view.container.textContent.includes("null"), false);
+});
+
 test("loaded selected job opens in editor once and reports exact outcome", async () => {
   const jobs = [];
   const completion = deferred();

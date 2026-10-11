@@ -424,7 +424,7 @@ function PipelineList({
             {item.value.status}
           </span>
           <strong>Pipeline #{item.value.id}</strong>
-          <span>{item.value.ref}</span>
+          {item.value.ref !== null && <span>{item.value.ref}</span>}
           <code>{shortSha(item.value.sha)}</code>
         </button>
       ))}
@@ -1443,7 +1443,9 @@ function requireReceiptBinding(
 function targetLabel(intent: MutationIntent): string {
   return intent.job
     ? `job ${intent.job.value.name} (#${intent.job.value.id}) in pipeline #${intent.pipeline.value.id}`
-    : `pipeline #${intent.pipeline.value.id} on ${intent.pipeline.value.ref}`;
+    : intent.pipeline.value.ref === null
+      ? `pipeline #${intent.pipeline.value.id}`
+      : `pipeline #${intent.pipeline.value.id} on ${intent.pipeline.value.ref}`;
 }
 
 function actionLabel(action: CIMutationAction): string {

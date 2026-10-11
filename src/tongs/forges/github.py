@@ -1753,8 +1753,8 @@ class GitHubClient(ForgeClient):
         return Pipeline(
             id=data["id"],
             status=_parse_ci_status(data.get("status"), data.get("conclusion")),
-            ref=data.get("head_branch", ""),
-            sha=data.get("head_sha", ""),
+            ref=data.get("head_branch") or "",
+            sha=data.get("head_sha") or "",
             web_url=data.get("html_url") or "",
             source=data.get("event") or "",
             created_at=_parse_datetime(data.get("created_at")),
