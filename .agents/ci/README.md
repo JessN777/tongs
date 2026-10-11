@@ -83,6 +83,7 @@ check, and the desktop format and lint checks as local hooks. Install them with
 `pre-commit install` and commit from the activated `.venv`, whose `lint` extra
 provides the Ruff version CI pins; the desktop hooks need
 `npm ci --prefix desktop/tools/lint` first.
+
 The installable production provider example has focused Python and prebuilt ESM
 checks:
 
@@ -417,8 +418,8 @@ module enforces both. The lint job installs Ruff from the `lint` extra in
 lock. The desktop formatter and linter come from
 `desktop/tools/lint/package-lock.json`, with every direct dependency an exact
 version; `tests/ci/test_lint_tooling_contract.py` enforces that and the lint
-job's install. `tests/ci/test_workflow_hygiene.py` requires every package a workflow
-`pip install`s by name to pin one exact version, and rejects `npx`,
+job's install. `tests/ci/test_workflow_hygiene.py` requires every package a
+workflow `pip install`s by name to pin one exact version, and rejects `npx`,
 `npm install`, `pipx`, `uvx` and `uv tool` in workflow steps, so a tool comes
 from a lockfile or a pinned extra.
 
@@ -447,8 +448,9 @@ and local source trees built with `--no-build-isolation`.
 `.github/linters` npm lockfiles, and the `desktop/tools/lint` lockfile as its
 own entry. Per entry, minor and patch updates arrive as one pull request and
 majors as another. TypeScript in `desktop/tools/lint` takes patch updates only:
-move it by hand once typescript-eslint's peer range allows a newer minor. Dependabot adds no labels, because a
-label would rerun CI through the `labeled` event and cancel the first run.
+move it by hand once typescript-eslint's peer range allows a newer minor.
+Dependabot adds no labels, because a label would rerun CI through the `labeled`
+event and cancel the first run.
 Electron is not updated by Dependabot: bump it by hand together with the
 pinned version and digests under `packaging/desktop/archive`. Dependabot cannot
 regenerate the uv-compiled hash locks in `requirements/`, so their inputs are

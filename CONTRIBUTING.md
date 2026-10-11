@@ -71,9 +71,10 @@ The desktop build (`npm run build --prefix desktop`) and its tests
 use a lot of memory, so run them under the memory limit in the
 [testing guide](.agents/testing/README.md#bounded-local-node-procedure). It
 shows how to run the build and a single test file, which is usually all you
-need while developing. The `test` script runs one test file at a time. In renderer tests, assert on text, attributes, and
-counts rather than on DOM nodes: a failing assertion on a DOM node can use more
-than a gigabyte of memory while it formats the error.
+need while developing. The `test` script runs one test file at a time. In
+renderer tests, assert on text, attributes, and counts rather than on DOM nodes:
+a failing assertion on a DOM node can use more than a gigabyte of memory while
+it formats the error.
 
 The desktop sources are formatted by Prettier with its default options and
 linted by ESLint with typescript-eslint's recommended rules. Both live in their

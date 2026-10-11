@@ -272,3 +272,18 @@ def test_the_control_character_hook_reads_every_staged_file(
     # pre-commit's type detection calls a file holding NUL binary.
     for key in ("types", "types_or", "files", "exclude", "pass_filenames"):
         assert key not in hook, key
+
+
+# The blame ignore list.
+
+
+def test_the_blame_ignore_list_names_full_commits_each_with_its_title() -> None:
+    """git blame and GitHub read ``.git-blame-ignore-revs`` as full commit IDs,
+    one per line; each one follows a comment naming the commit."""
+
+    lines = (ROOT / ".git-blame-ignore-revs").read_text().splitlines()
+    commits = [index for index, line in enumerate(lines) if line and line[0] != "#"]
+    assert commits
+    for index in commits:
+        assert re.fullmatch(r"[0-9a-f]{40}", lines[index]), lines[index]
+        assert lines[index - 1].startswith("# Refs #"), lines[index - 1]
