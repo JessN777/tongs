@@ -30,6 +30,9 @@ class Repo:
     path: Path
     remotes: tuple[Remote, ...]
     primary_remote: Remote | None = field(default=None, repr=False)
+    # True when ``.git`` is a file pointing at a git directory elsewhere, as in
+    # a linked worktree, rather than the main checkout's own ``.git`` folder.
+    worktree: bool = False
 
     @property
     def display_name(self) -> str:
