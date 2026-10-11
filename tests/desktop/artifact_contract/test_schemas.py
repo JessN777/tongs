@@ -124,3 +124,42 @@ def test_release_schema_matches_package_kind_ownership_and_name_rules() -> None:
         invalid["artifacts"][0].update(fields)
         with pytest.raises(jsonschema.ValidationError):
             validator_type(schema).validate(invalid)
+
+
+def _rpm_release(ownership: str) -> dict[str, object]:
+    release = json.loads(
+        (FIXTURE_ROOT / "desktop-manifest-v1.synthetic.json").read_bytes()
+    )
+    release["artifacts"][0].update(
+        {
+            "artifact_id": "fedora-44-x86_64-rpm",
+            "name": "tongs-desktop-1.2.3-1.fc44.x86_64.rpm",
+            "package_kind": "rpm",
+            "ownership": ownership,
+        }
+    )
+    return release
+
+
+def test_release_schema_and_parser_accept_a_system_owned_rpm() -> None:
+    schema = json.loads(release_schema_bytes())
+    validator_type = jsonschema.validators.validator_for(schema)
+    release = _rpm_release("system")
+
+    validator_type(schema).validate(release)
+    parsed = parse_release_manifest(canonical_json(release))
+
+    assert parsed.artifacts[0].ownership.value == "system"
+
+
+def test_release_schema_and_parser_reject_a_per_user_rpm() -> None:
+    schema = json.loads(release_schema_bytes())
+    validator_type = jsonschema.validators.validator_for(schema)
+    release = _rpm_release("per-user")
+
+    with pytest.raises(jsonschema.ValidationError) as raised:
+        validator_type(schema).validate(release)
+    assert list(raised.value.absolute_path) == ["artifacts", 0, "ownership"]
+    assert raised.value.validator == "const"
+    with pytest.raises(ArtifactContractError):
+        parse_release_manifest(canonical_json(release))

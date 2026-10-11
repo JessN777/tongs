@@ -27,6 +27,8 @@ from tongs.desktop.installer.commands import (
 from tongs.desktop.installer.extract import extract_verified_archive
 from tongs.desktop.installer.models import (
     PERSISTENT_INSTALL_GUIDANCE,
+    InstallerError,
+    InstallerErrorCode,
     InstallRequest,
 )
 
@@ -224,6 +226,69 @@ def test_redownload_replaces_corrupted_same_version_at_a_new_target(
     assert repaired.active.payload.target_path != old_target
     assert repaired.active.payload.launcher_path.read_text() != "corrupted"
     assert stage.requests == [InstallRequest(), InstallRequest()]
+
+
+def test_redownload_discards_an_unrecoverable_interrupted_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context, stage, _launch = _context(tmp_path)
+    assert run_desktop_cli(["install"], console_argv0="tongs", context=context) == 0
+    with context.store.transaction() as transaction:
+        installed = transaction.read_state()
+    assert installed is not None and installed.active is not None
+
+    def fail_menu(*_args: object, **_kwargs: object) -> str:
+        raise InstallerError(InstallerErrorCode.STATE_CONFLICT, "injected menu failure")
+
+    monkeypatch.setattr(activation_module, "install_user_menu", fail_menu)
+    assert (
+        run_desktop_cli(
+            ["update"], console_argv0="tongs", context=context, stderr=io.StringIO()
+        )
+        == 2
+    )
+    monkeypatch.undo()
+    with context.store.transaction() as transaction:
+        journal = transaction.read_journal()
+        assert transaction.read_state() == installed
+    assert journal is not None
+    candidate = journal.target.payload
+    assert candidate.target_path.is_dir()
+    candidate.launcher_path.write_text("corrupted")
+    errors = io.StringIO()
+    assert (
+        run_desktop_cli(
+            ["repair"], console_argv0="tongs", context=context, stderr=errors
+        )
+        == 2
+    )
+    assert context.store.paths.journal_path.exists()
+
+    output = io.StringIO()
+    assert (
+        run_desktop_cli(
+            ["repair", "--redownload"],
+            console_argv0="tongs",
+            context=context,
+            stdout=output,
+            stderr=errors,
+        )
+        == 0
+    )
+
+    assert "downloading a verified replacement" in output.getvalue()
+    assert not context.store.paths.journal_path.exists()
+    assert not candidate.target_path.exists()
+    with context.store.transaction() as transaction:
+        assert transaction.read_journal() is None
+        repaired = transaction.read_state()
+    assert repaired is not None and repaired.active is not None
+    assert repaired.active.payload.target_path not in {
+        candidate.target_path,
+        installed.active.payload.target_path,
+    }
+    assert repaired.active.payload.launcher_path.read_text() != "corrupted"
+    assert stage.requests == [InstallRequest(), InstallRequest(), InstallRequest()]
 
 
 def test_relative_xdg_override_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
