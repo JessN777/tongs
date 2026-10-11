@@ -115,9 +115,14 @@ jobs:
           .github/linters/node_modules/.bin/markdownlint-cli2
           --config .github/linters/.markdownlint-cli2.jsonc
           "docs/**/*.md" "*.md" ".agents/**/*.md" ".github/*.md" "site/README.md"
+      # The lint job runs the same check over the whole tree; running it here
+      # too covers a pull request that selects the docs lane alone.
+      - name: Check tracked text files for control characters
+        run: python3 scripts/check_control_chars.py
 
-  # Also runs the CI and container harness suites, which read only the
-  # repository and its workflows.  Every path under tests/ci and
+  # Also checks tracked text files for control characters, formats and lints
+  # the desktop sources, and runs the CI and container harness suites, which
+  # read only the repository and its workflows.  Every path under tests/ci and
   # tests/containers selects the full graph, so this job runs whenever they
   # change.
   lint-and-format:
@@ -142,6 +147,21 @@ jobs:
         run: ruff check src/ tests/ packaging/ scripts/ .github/scripts/ examples/
       - name: Check source and test formatting
         run: ruff format --check src/ tests/ packaging/ scripts/ .github/scripts/ examples/
+      - name: Check tracked text files for control characters
+        run: python scripts/check_control_chars.py
+      # The desktop formatter and linter come from their own pinned package,
+      # because typescript-eslint needs a TypeScript older than the app's.
+      - name: Set up Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Install the pinned desktop formatter and linter from their lockfile
+        run: npm ci --prefix desktop/tools/lint --ignore-scripts --no-audit --no-fund
+      - name: Check desktop formatting
+        run: npm run format:check --prefix desktop
+      - name: Lint desktop sources
+        run: npm run lint --prefix desktop
       - name: Run the CI and container harness tests with a machine-readable report
         run: |
           set -euo pipefail

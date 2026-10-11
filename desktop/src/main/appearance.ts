@@ -25,7 +25,8 @@ export const WINDOW_BACKGROUND = Object.freeze({
   dark: "#0c1119",
   light: "#f6f8fa",
 } as const);
-export const COLOR_SCHEME_SAVE_FAILURE = "The colour scheme could not be saved.";
+export const COLOR_SCHEME_SAVE_FAILURE =
+  "The colour scheme could not be saved.";
 
 /** The part of Electron's `nativeTheme` the appearance drives. */
 export interface NativeThemeTarget {
@@ -58,12 +59,18 @@ export function windowBackground(dark: boolean): string {
   return dark ? WINDOW_BACKGROUND.dark : WINDOW_BACKGROUND.light;
 }
 
+/** Where the toggle's choice is read from and saved to. */
+export interface ColorSchemeStore {
+  readColorScheme(): Promise<SavedColorScheme | null>;
+  writeColorScheme(choice: SavedColorScheme | null): Promise<void>;
+}
+
 /**
  * The desktop settings file. A missing, unreadable, oversized or malformed
  * file means nothing is saved. Writes replace the file atomically with mode
  * 0600 and run one at a time, so the last choice is the one kept.
  */
-export class DesktopSettingsStore {
+export class DesktopSettingsStore implements ColorSchemeStore {
   #writes: Promise<void> = Promise.resolve();
 
   constructor(readonly file: string) {
@@ -116,6 +123,38 @@ export class DesktopSettingsStore {
 }
 
 /**
+ * A store that starts empty and keeps the toggle's choice in memory only, so
+ * a run that uses it never reads or changes the saved settings file.
+ */
+export class TransientSettingsStore implements ColorSchemeStore {
+  #choice: SavedColorScheme | null = null;
+
+  async readColorScheme(): Promise<SavedColorScheme | null> {
+    return this.#choice;
+  }
+
+  async writeColorScheme(choice: SavedColorScheme | null): Promise<void> {
+    this.#choice = choice;
+  }
+}
+
+/**
+ * The store for this run (#438). A production smoke run ignores the saved
+ * choice and follows the configured scheme, so its screenshots and report do
+ * not depend on what a developer last chose in the app bar, and it leaves
+ * that choice untouched. Every other run uses the settings file in the user
+ * data folder.
+ */
+export function colorSchemeStoreFor(
+  userDataPath: string,
+  smoke: boolean,
+): ColorSchemeStore {
+  return smoke
+    ? new TransientSettingsStore()
+    : new DesktopSettingsStore(path.join(userDataPath, DESKTOP_SETTINGS_FILE));
+}
+
+/**
  * Owns the scheme in effect: the saved choice when there is one, else the
  * configured value. Every change bumps the revision, applies the scheme to
  * the native theme and tells each listener.
@@ -127,7 +166,7 @@ export class AppearanceController {
   readonly #listeners = new Set<(appearance: AppearanceDto) => void>();
 
   constructor(
-    private readonly store: DesktopSettingsStore,
+    private readonly store: ColorSchemeStore,
     private readonly theme: NativeThemeTarget,
   ) {
     this.#apply();
@@ -204,6 +243,7 @@ export class AppearanceController {
 
   #apply(): void {
     const effective = this.#saved ?? this.#configured;
-    if (this.theme.themeSource !== effective) this.theme.themeSource = effective;
+    if (this.theme.themeSource !== effective)
+      this.theme.themeSource = effective;
   }
 }

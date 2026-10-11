@@ -87,7 +87,15 @@ from tongs.diff.context import GapPosition, file_gaps, verify_new_side
 from tongs.diff.conversion import convert_forge_changes
 from tongs.diff.models import DiffFile
 from tongs.errors import redact_credentials
-from tongs.forges.models import JobLogTail, MRState, MRSummary, Pipeline, PipelineJob
+from tongs.forges.models import (
+    JobLogTail,
+    MRState,
+    MRSummary,
+    Pipeline,
+    PipelineJob,
+    job_log_truncation_note,
+    log_from_line_start,
+)
 from tongs.plugins.desktop import (
     DesktopCallContext,
     DesktopCancellation,
@@ -2350,7 +2358,7 @@ def _log_snapshot(
             return revision, entries
         # Each character adds at least one byte to the measure, so dropping
         # the excess plus the note's room in characters makes enough space.
-        text = _log_from_line_start(text[excess + _LOG_NOTE_ROOM :])
+        text = log_from_line_start(text[excess + _LOG_NOTE_ROOM :])
         truncated = True
     raise ProtocolError(
         ProtocolErrorCode.RESPONSE_TOO_LARGE,
@@ -2359,27 +2367,7 @@ def _log_snapshot(
 
 
 def _log_truncation_note(text: str, total_bytes: int) -> str:
-    shown = len(text.encode("utf-8"))
-    total = max(total_bytes, shown)
-    return (
-        f"[tongs] This job log is {_byte_size(total)}. Showing the last "
-        f"{_byte_size(shown)}; earlier output is left out.\n"
-    )
-
-
-def _byte_size(count: int) -> str:
-    if count >= 1024 * 1024:
-        return f"{count / (1024 * 1024):.1f} MiB"
-    if count >= 1024:
-        return f"{count / 1024:.1f} KiB"
-    return f"{count} bytes"
-
-
-def _log_from_line_start(text: str) -> str:
-    newline = text.find("\n")
-    if newline == -1 or newline == len(text) - 1:
-        return text
-    return text[newline + 1 :]
+    return job_log_truncation_note(len(text.encode("utf-8")), total_bytes)
 
 
 def _log_entries(encoded: bytes) -> tuple[JsonObject, ...]:

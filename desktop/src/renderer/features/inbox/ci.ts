@@ -241,12 +241,15 @@ export class CILookups {
     const failure = this.failed.get(handle);
     if (failure) failure.due = false;
     let token: string | null = null;
-    let outcome:
-      | { readonly status: CIStatusValue; readonly wait: number | null }
-      | null = null;
+    let outcome: {
+      readonly status: CIStatusValue;
+      readonly wait: number | null;
+    } | null;
     try {
       const read = this.bridge.getReviewCIStatus(
-        this.fresh.has(handle) ? { review: handle, fresh: true } : { review: handle },
+        this.fresh.has(handle)
+          ? { review: handle, fresh: true }
+          : { review: handle },
       );
       token = read.requestToken;
       if (generation === this.generation) this.tokens.add(token);

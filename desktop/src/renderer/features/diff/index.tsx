@@ -636,7 +636,10 @@ function revealJumpTarget(
   revealFile(review, loaded, target.fileIndex);
 }
 
-function fileAt(loaded: LoadedDiff, fileIndex: number): DiffFileRow | undefined {
+function fileAt(
+  loaded: LoadedDiff,
+  fileIndex: number,
+): DiffFileRow | undefined {
   return loaded.rows.find(
     (row): row is DiffFileRow =>
       row.kind === "file" && row.file_index === fileIndex,
@@ -657,7 +660,11 @@ function fileIsViewed(
 }
 
 /** Clears the viewed mark of the file at `fileIndex`, if it has one. */
-function revealFile(review: string, loaded: LoadedDiff, fileIndex: number): void {
+function revealFile(
+  review: string,
+  loaded: LoadedDiff,
+  fileIndex: number,
+): void {
   const file = fileAt(loaded, fileIndex);
   if (file)
     setFileViewed(review, loaded.revision.head_sha, viewedFileKey(file), false);
@@ -847,7 +854,11 @@ const EMPTY_FILE_CONTEXT: FileContextView = Object.freeze({
 });
 
 type GapRead =
-  | { readonly status: "ok"; readonly rows: GapLines; readonly lineCount: number | null }
+  | {
+      readonly status: "ok";
+      readonly rows: GapLines;
+      readonly lineCount: number | null;
+    }
   | { readonly status: "failed"; readonly message: string }
   | { readonly status: "expired" }
   | { readonly status: "stale" };
@@ -931,7 +942,8 @@ class DiffContextStore {
     this.closed = true;
     const tokens = [...this.reads];
     this.reads.clear();
-    for (const running of this.generations.values()) tokens.push(...running.tokens);
+    for (const running of this.generations.values())
+      tokens.push(...running.tokens);
     this.generations.clear();
     for (const token of tokens)
       void this.bridge.cancelRead(token).catch(() => false);
@@ -981,11 +993,19 @@ class DiffContextStore {
       return;
     }
     if (current.full !== null) {
-      this.update(fileIndex, { shown: current.full, full: null, message: null });
+      this.update(fileIndex, {
+        shown: current.full,
+        full: null,
+        message: null,
+      });
       return;
     }
     const previous = current.shown;
-    this.update(fileIndex, { full: previous, fullLoading: true, message: null });
+    this.update(fileIndex, {
+      full: previous,
+      fullLoading: true,
+      message: null,
+    });
     const active = (): boolean =>
       !this.closed && this.file(fileIndex).full === previous;
     const stop = (message?: string): void => {
@@ -1024,7 +1044,9 @@ class DiffContextStore {
     const now = this.file(fileIndex);
     this.update(fileIndex, {
       shown: new Set(
-        gaps.map((gap) => gap.gap_index).filter((index) => now.lines.has(index)),
+        gaps
+          .map((gap) => gap.gap_index)
+          .filter((index) => now.lines.has(index)),
       ),
       fullLoading: false,
     });
@@ -1147,7 +1169,10 @@ class DiffContextStore {
     const rows: DiffContextRow[] = [];
     for (let requests = 0; end === null || next < end; requests += 1) {
       if (requests >= MAX_CONTEXT_REQUESTS)
-        return { status: "failed", message: CONTEXT_STATUS_MESSAGES.too_large! };
+        return {
+          status: "failed",
+          message: CONTEXT_STATUS_MESSAGES.too_large!,
+        };
       const count = Math.min(
         MAX_DIFF_CONTEXT_LINES,
         end === null ? MAX_DIFF_CONTEXT_LINES : end - next,
@@ -1277,8 +1302,10 @@ class DiffContextStore {
       this.expired();
       return;
     }
-    if (first.status !== "ok") return fail(first.message || GENERATION_FAILED_MESSAGE);
-    if (!sameRevisionValue(first.revision, this.revision)) return inconsistent();
+    if (first.status !== "ok")
+      return fail(first.message || GENERATION_FAILED_MESSAGE);
+    if (!sameRevisionValue(first.revision, this.revision))
+      return inconsistent();
     const rows: DiffWireRow[] = [...first.entries];
     let page: DiffPage<DiffWireRow> = first;
     let pages = 1;
@@ -1312,7 +1339,9 @@ class DiffContextStore {
       pages += 1;
     }
     if (rows.length > MAX_DIFF_ROWS)
-      return fail("The generated diff is too large to show in the desktop app.");
+      return fail(
+        "The generated diff is too large to show in the desktop app.",
+      );
     if (
       rows[0]?.kind !== "file" ||
       rows.some((row) => row.file_index !== fileIndex || row.kind === "gap")
@@ -1341,7 +1370,10 @@ class DiffContextStore {
 
   private update(fileIndex: number, patch: Partial<FileContextView>): void {
     if (this.closed) return;
-    this.files.set(fileIndex, Object.freeze({ ...this.file(fileIndex), ...patch }));
+    this.files.set(
+      fileIndex,
+      Object.freeze({ ...this.file(fileIndex), ...patch }),
+    );
     this.changed();
   }
 }
@@ -1438,7 +1470,10 @@ function contextSyntaxOf(
   file: DiffFileRow | null,
   items: readonly DiffViewRow[],
 ): (row: DiffContextRow) => SyntaxLine | undefined {
-  const runs = new WeakMap<DiffContextRow, { start: DiffContextRow; rows: DiffContextRow[]; index: number }>();
+  const runs = new WeakMap<
+    DiffContextRow,
+    { start: DiffContextRow; rows: DiffContextRow[]; index: number }
+  >();
   if (file === null) return () => undefined;
   let run: DiffContextRow[] = [];
   for (const row of items) {
@@ -1890,7 +1925,11 @@ function DiffWorkspace({
       { key: "n", run: () => stepRow(1) },
       { key: "p", run: () => stepRow(-1) },
       { key: "r", run: replyToFocusedThread },
-      { key: "Enter", primary: true, run: () => pressComposerPrimary(rowsNode) },
+      {
+        key: "Enter",
+        primary: true,
+        run: () => pressComposerPrimary(rowsNode),
+      },
       { key: "Escape", run: closeComposer },
     ],
     // The review drawer is a dialog over the diff. It is not `aria-modal`,
@@ -2321,7 +2360,10 @@ const EMPTY_SLICE: FileSlice = Object.freeze({
 function fileSlices(
   rows: readonly DiffWireRow[],
 ): ReadonlyMap<number, FileSlice> {
-  const slices = new Map<number, { rows: DiffWireRow[]; hunks: DiffHunkRow[] }>();
+  const slices = new Map<
+    number,
+    { rows: DiffWireRow[]; hunks: DiffHunkRow[] }
+  >();
   for (const row of rows) {
     let slice = slices.get(row.file_index);
     if (!slice) {
@@ -2568,7 +2610,11 @@ function DiffRowView({
               ? `Select ${defaultSide} line ${defaultSide === "old" ? row.old_line : row.new_line}`
               : undefined
           }
-          onClick={selectable ? (event) => choose(defaultSide, event.shiftKey) : undefined}
+          onClick={
+            selectable
+              ? (event) => choose(defaultSide, event.shiftKey)
+              : undefined
+          }
           onKeyDown={
             selectable
               ? (event) => {
@@ -2793,8 +2839,7 @@ function firstRenderedPendingEntry(
         : row.kind === "line"
           ? pendingOnUnifiedRow(pending, file, row)
           : [];
-    for (const entry of entries)
-      if (entry.id !== editing?.id) return entry.id;
+    for (const entry of entries) if (entry.id !== editing?.id) return entry.id;
   }
   return null;
 }
@@ -3184,7 +3229,9 @@ function fileModeChange(file: DiffFileRow): string {
 
 function FileMode({ file }: { readonly file: DiffFileRow }): ReactNode {
   const change = fileModeChange(file);
-  return change ? <span className="file-status file-mode">{change}</span> : null;
+  return change ? (
+    <span className="file-status file-mode">{change}</span>
+  ) : null;
 }
 
 /**
@@ -3399,15 +3446,7 @@ function SplitCell({
   const choose = (extend = false): void => {
     if (!selectable || !cell || !file || !cell.anchor_side) return;
     selectAnchor(
-      selectionForSplitCell(
-        review,
-        loaded,
-        file,
-        row,
-        cell,
-        selection,
-        extend,
-      ),
+      selectionForSplitCell(review, loaded, file, row, cell, selection, extend),
     );
   };
   const draggable = selectable && cell !== null && cell.anchor_side !== null;
@@ -3533,7 +3572,15 @@ export function selectionForUnifiedLine(
   const candidates = unifiedSideRows(loaded, file, row.hunk_index, side);
   const targetIndex = candidates.indexOf(row);
   const originIndex = extend
-    ? rangeOriginIndex(existing, review, loaded, file, row.hunk_index, side, candidates)
+    ? rangeOriginIndex(
+        existing,
+        review,
+        loaded,
+        file,
+        row.hunk_index,
+        side,
+        candidates,
+      )
     : -1;
   const selected =
     targetIndex >= 0 && originIndex >= 0
@@ -3581,7 +3628,15 @@ export function selectionForSplitCell(
   const targetIndex = candidates.findIndex((item) => item.row === row);
   const cells = candidates.map((item) => item.cell);
   const originIndex = extend
-    ? rangeOriginIndex(existing, review, loaded, file, row.hunk_index, side, cells)
+    ? rangeOriginIndex(
+        existing,
+        review,
+        loaded,
+        file,
+        row.hunk_index,
+        side,
+        cells,
+      )
     : -1;
   const selected =
     targetIndex >= 0 && originIndex >= 0
@@ -3610,7 +3665,9 @@ export function selectionForSplitCell(
     contextComplete: context.complete,
     rangeOriginOldLine: origin.old_line,
     rangeOriginNewLine: origin.new_line,
-    selectedLines: Object.freeze(selected.map((item) => selectedLine(item.cell))),
+    selectedLines: Object.freeze(
+      selected.map((item) => selectedLine(item.cell)),
+    ),
   });
 }
 
@@ -3755,7 +3812,9 @@ function splitSideRows(
     )
     .map((candidate) => ({ row: candidate, cell: candidate[side] }))
     .filter(
-      (item): item is { readonly row: SplitDiffRow; readonly cell: SplitDiffCell } =>
+      (
+        item,
+      ): item is { readonly row: SplitDiffRow; readonly cell: SplitDiffCell } =>
         item.cell !== null &&
         item.cell.line_type !== "no_newline" &&
         (side === "old"
@@ -3764,10 +3823,12 @@ function splitSideRows(
     );
 }
 
-function rangeOriginIndex<T extends {
-  readonly old_line: number | null;
-  readonly new_line: number | null;
-}>(
+function rangeOriginIndex<
+  T extends {
+    readonly old_line: number | null;
+    readonly new_line: number | null;
+  },
+>(
   existing: InlineAnchorSelection | null,
   review: string,
   loaded: LoadedDiff,
@@ -3829,7 +3890,10 @@ function unifiedRangeContext(
 function splitRangeContext(
   loaded: LoadedDiff,
   file: DiffFileRow,
-  selected: readonly { readonly row: SplitDiffRow; readonly cell: SplitDiffCell }[],
+  selected: readonly {
+    readonly row: SplitDiffRow;
+    readonly cell: SplitDiffCell;
+  }[],
   side: "old" | "new",
 ): SourceContext {
   const first = selected[0];
@@ -3864,7 +3928,8 @@ export function unifiedSourceContext(
 ): SourceContext {
   const candidates = unifiedSideRows(loaded, file, target.hunk_index, side);
   const index = candidates.indexOf(target);
-  if (index < 0) return Object.freeze({ lines: Object.freeze([]), complete: false });
+  if (index < 0)
+    return Object.freeze({ lines: Object.freeze([]), complete: false });
   return Object.freeze({
     lines: Object.freeze(
       candidates
@@ -3883,7 +3948,8 @@ export function splitSourceContext(
 ): SourceContext {
   const candidates = splitSideRows(loaded, file, target.hunk_index, side);
   const index = candidates.findIndex((item) => item.row === target);
-  if (index < 0) return Object.freeze({ lines: Object.freeze([]), complete: false });
+  if (index < 0)
+    return Object.freeze({ lines: Object.freeze([]), complete: false });
   return Object.freeze({
     lines: Object.freeze(
       candidates
@@ -4195,17 +4261,17 @@ function sameSelectedSource(
   if (!left.selectedLines) return true;
   return Boolean(
     right.selectedLines &&
-      left.selectedLines.length === right.selectedLines.length &&
-      left.selectedLines.every((line, index) => {
-        const candidate = right.selectedLines![index];
-        return (
-          candidate !== undefined &&
-          line.oldLine === candidate.oldLine &&
-          line.newLine === candidate.newLine &&
-          line.lineType === candidate.lineType &&
-          line.content === candidate.content
-        );
-      }),
+    left.selectedLines.length === right.selectedLines.length &&
+    left.selectedLines.every((line, index) => {
+      const candidate = right.selectedLines![index];
+      return (
+        candidate !== undefined &&
+        line.oldLine === candidate.oldLine &&
+        line.newLine === candidate.newLine &&
+        line.lineType === candidate.lineType &&
+        line.content === candidate.content
+      );
+    }),
   );
 }
 

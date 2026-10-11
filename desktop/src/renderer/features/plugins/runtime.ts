@@ -11,7 +11,6 @@ import {
   resolvePluginResources,
   type DesktopPluginModule,
   type PluginCleanup,
-  type PluginManifest,
   type PluginNotificationSeverity,
   type PluginRecord,
   type PluginUiApi,

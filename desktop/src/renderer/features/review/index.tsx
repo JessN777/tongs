@@ -68,14 +68,11 @@ export function createReviewFeature(
         },
       },
     ],
-    matches: (route) => route.kind === "review" && route.panel === "discussions",
+    matches: (route) =>
+      route.kind === "review" && route.panel === "discussions",
     render: (context, route) =>
       route.kind === "review" && route.panel === "discussions" ? (
-        <ReviewWorkflow
-          bridge={bridge}
-          context={context}
-          route={route}
-        />
+        <ReviewWorkflow bridge={bridge} context={context} route={route} />
       ) : null,
   };
 }
@@ -227,8 +224,7 @@ function ThreadJumpList({
         .filter((discussion) => discussion.is_inline)
         .slice()
         .sort(
-          (left, right) =>
-            Number(left.is_resolved) - Number(right.is_resolved),
+          (left, right) => Number(left.is_resolved) - Number(right.is_resolved),
         ),
     [discussions],
   );
@@ -238,7 +234,10 @@ function ThreadJumpList({
       {threads.length === 0 ? (
         <Notice kind="empty">No discussions yet.</Notice>
       ) : (
-        <div className="review-workflow-thread-list" onKeyDown={moveButtonFocus}>
+        <div
+          className="review-workflow-thread-list"
+          onKeyDown={moveButtonFocus}
+        >
           {threads.map((discussion) => (
             <ThreadJumpRow
               key={discussion.id}
@@ -311,17 +310,37 @@ function ThreadJumpRow({
   );
 }
 
-function Notice({ kind, children }: { readonly kind: string; readonly children: ReactNode }): ReactNode {
-  return <div className={`notice notice-${kind}`} role={kind === "error" ? "alert" : "status"}>{children}</div>;
+function Notice({
+  kind,
+  children,
+}: {
+  readonly kind: string;
+  readonly children: ReactNode;
+}): ReactNode {
+  return (
+    <div
+      className={`notice notice-${kind}`}
+      role={kind === "error" ? "alert" : "status"}
+    >
+      {children}
+    </div>
+  );
 }
 
 function moveButtonFocus(event: KeyboardEvent<HTMLElement>): void {
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-  const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+  const buttons = [
+    ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+      "button:not(:disabled)",
+    ),
+  ];
   if (buttons.length === 0) return;
   const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
   const direction = event.key === "ArrowDown" ? 1 : -1;
-  const next = buttons[(current < 0 ? 0 : current + direction + buttons.length) % buttons.length];
+  const next =
+    buttons[
+      (current < 0 ? 0 : current + direction + buttons.length) % buttons.length
+    ];
   if (next) {
     event.preventDefault();
     next.focus();
@@ -332,5 +351,9 @@ export function sameReviewRevision(
   left: ReviewRevisionDto,
   right: ReviewRevisionDto,
 ): boolean {
-  return left.head_sha === right.head_sha && left.base_sha === right.base_sha && left.start_sha === right.start_sha;
+  return (
+    left.head_sha === right.head_sha &&
+    left.base_sha === right.base_sha &&
+    left.start_sha === right.start_sha
+  );
 }

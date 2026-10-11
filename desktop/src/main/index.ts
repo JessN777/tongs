@@ -12,8 +12,7 @@ import {
 } from "electron";
 import {
   AppearanceController,
-  DESKTOP_SETTINGS_FILE,
-  DesktopSettingsStore,
+  colorSchemeStoreFor,
   windowBackground,
 } from "./appearance.js";
 import { AssetCatalog } from "./assets.js";
@@ -84,10 +83,9 @@ async function run(): Promise<void> {
   );
   // The saved scheme applies before the service starts, so even a startup
   // error dialog matches it; the configured one arrives with the handshake.
+  // A smoke run ignores the saved scheme and follows the configured one.
   const appearance = new AppearanceController(
-    new DesktopSettingsStore(
-      path.join(app.getPath("userData"), DESKTOP_SETTINGS_FILE),
-    ),
+    colorSchemeStoreFor(app.getPath("userData"), Boolean(smokePath)),
     nativeTheme,
   );
   await appearance.load();

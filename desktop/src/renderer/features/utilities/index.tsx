@@ -5,7 +5,10 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import type { ClearCacheResult, CopyReviewUrlResult } from "../../../shared/utilities.js";
+import type {
+  ClearCacheResult,
+  CopyReviewUrlResult,
+} from "../../../shared/utilities.js";
 import type {
   AppRoute,
   FeatureContext,
@@ -46,10 +49,7 @@ export class WorkspaceUtilityController {
     this.update({ kind: "idle" });
   }
 
-  async copyReviewUrl(
-    context: FeatureContext,
-    route: AppRoute,
-  ): Promise<void> {
+  async copyReviewUrl(context: FeatureContext, route: AppRoute): Promise<void> {
     if (route.kind !== "review") return;
     let result: CopyReviewUrlResult;
     try {
@@ -57,7 +57,8 @@ export class WorkspaceUtilityController {
     } catch {
       result = {
         outcome: "failed",
-        message: "The review URL could not be copied. Check clipboard access and retry.",
+        message:
+          "The review URL could not be copied. Check clipboard access and retry.",
       };
     }
     this.update({
@@ -78,7 +79,8 @@ export class WorkspaceUtilityController {
     } catch {
       result = {
         outcome: "failed",
-        message: "The shared API cache could not be cleared. Retry after reconnecting the local service.",
+        message:
+          "The shared API cache could not be cleared. Retry after reconnecting the local service.",
       };
     } finally {
       this.clearInFlight = false;
@@ -150,12 +152,16 @@ export function WorkspaceUtilityOverlay({
         className="utility-dialog-backdrop"
         onKeyDown={(event) => cancelOnEscape(event, controller)}
       >
-        <section className="utility-dialog" role="alertdialog" aria-modal="true">
+        <section
+          className="utility-dialog"
+          role="alertdialog"
+          aria-modal="true"
+        >
           <div>
             <strong>Clear shared API cache?</strong>
             <p>
-              Cached forge responses will be removed. Saved and in-progress review
-              drafts will be preserved.
+              Cached forge responses will be removed. Saved and in-progress
+              review drafts will be preserved.
             </p>
           </div>
           <div className="utility-actions">
@@ -185,7 +191,10 @@ export function WorkspaceUtilityOverlay({
       role={state.severity === "error" ? "alert" : "status"}
     >
       <span>{state.message}</span>
-      <button className="button button-quiet" onClick={() => controller.cancel()}>
+      <button
+        className="button button-quiet"
+        onClick={() => controller.cancel()}
+      >
         Dismiss
       </button>
     </section>

@@ -1,8 +1,5 @@
 import type { JsonObject, JsonValue } from "../shared/bridge.js";
-import {
-  CI_IPC_CHANNELS,
-  type CIMutationAction,
-} from "../shared/ci.js";
+import { CI_IPC_CHANNELS, type CIMutationAction } from "../shared/ci.js";
 
 const MAX_OPERATION_ID = 128;
 const MAX_TEXT = 2048;
@@ -186,7 +183,11 @@ function handle(value: unknown): void {
 }
 
 function boundedText(value: unknown): asserts value is string {
-  if (typeof value !== "string" || value.length === 0 || value.length > MAX_TEXT)
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_TEXT
+  )
     throw new Error("Invalid CI text");
 }
 

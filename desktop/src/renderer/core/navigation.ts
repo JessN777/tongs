@@ -112,10 +112,12 @@ export interface DiscussionDiffTarget {
   readonly line: number;
 }
 
-const DEFAULT_INBOX_ROUTE: Extract<AppRoute, { kind: "inbox" }> = Object.freeze({
-  kind: "inbox",
-  repository: null,
-});
+const DEFAULT_INBOX_ROUTE: Extract<AppRoute, { kind: "inbox" }> = Object.freeze(
+  {
+    kind: "inbox",
+    repository: null,
+  },
+);
 
 let rememberedInboxRoute = DEFAULT_INBOX_ROUTE;
 
@@ -125,7 +127,8 @@ let rememberedInboxRoute = DEFAULT_INBOX_ROUTE;
  * repository discards the repository scope the user chose.
  */
 export function rememberInboxRoute(route: AppRoute): void {
-  if (route.kind === "inbox") rememberedInboxRoute = Object.freeze({ ...route });
+  if (route.kind === "inbox")
+    rememberedInboxRoute = Object.freeze({ ...route });
 }
 
 export function inboxReturnRoute(): Extract<AppRoute, { kind: "inbox" }> {
@@ -145,12 +148,10 @@ export function reconcileDiscoveryRoute(
   route: AppRoute,
   repositories: readonly RepositoryDto[],
 ): DiscoveryRouteReconciliation {
-  if (route.kind === "plugin")
-    return Object.freeze({ route, removed: false });
+  if (route.kind === "plugin") return Object.freeze({ route, removed: false });
   const selected =
     route.kind === "review" ? route.item.repository : route.repository;
-  if (selected === null)
-    return Object.freeze({ route, removed: false });
+  if (selected === null) return Object.freeze({ route, removed: false });
   const handle = typeof selected === "string" ? selected : selected.handle;
   const repository = repositories.find((item) => item.handle === handle);
   if (!repository)

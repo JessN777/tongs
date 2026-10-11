@@ -228,6 +228,15 @@ LAYER_ONE: list[tuple[str, frozenset[str] | None]] = [
     ("tests/packaging/desktop/sbom/schema/spdx-2.3.schema.json", SBOM_SCHEMA),
     # RELEASE EVIDENCE
     ("scripts/release-evidence/native/ci-proof.mjs", RELEASE_EVIDENCE),
+    # CONTROL-CHARACTER CHECK (the lint and docs jobs both run it)
+    ("scripts/check_control_chars.py", LINT_READ_DOCS),
+    # DESKTOP LINT TOOLING (run by the lint job, inside the desktop jobs' tree)
+    ("desktop/tools/lint/package.json", DESKTOP_TESTS),
+    ("desktop/tools/lint/eslint.config.mjs", DESKTOP_TESTS),
+    ("desktop/.prettierignore", DESKTOP_TESTS),
+    # REPOSITORY TOOLING read by the lint job's contract tests
+    (".pre-commit-config.yaml", frozenset({"lint"})),
+    (".git-blame-ignore-revs", frozenset({"lint"})),
     # FULL rules
     (".github/workflows/ci.yml", None),
     (".github/workflows/docs.yml", None),

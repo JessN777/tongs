@@ -41,18 +41,52 @@ purpose; every file in it also has one of the homes above.
 
 ## Desktop and other suites
 
-Install, build, type-check, and test the production Electron/React shell with:
-
-```bash
-npm ci --prefix desktop
-npm run build --prefix desktop
-TONGS_TEST_PYTHON="$(command -v python)" npm test --prefix desktop
-```
-
+Install, build, type-check, and test the production Electron/React shell with
+`npm ci --prefix desktop`, `npm run build --prefix desktop` and
+`TONGS_TEST_PYTHON="$(command -v python)" npm test --prefix desktop`, each one
+only inside the
+[bounded local Node procedure](../testing/README.md#bounded-local-node-procedure).
 `npm run build --prefix desktop` prepares assets, runs TypeScript checking, and
 creates build output. The test command repeats that build before the Electron
-and renderer test suites. Run it under the
-[bounded local Node procedure](../testing/README.md#bounded-local-node-procedure).
+and renderer test suites, one test file at a time (`--test-concurrency=1`).
+
+The desktop sources (TypeScript, CSS, HTML, JSON and the build script) are
+formatted by Prettier with its default options and linted by ESLint with
+typescript-eslint's recommended rules, without type information. Both come
+from their own pinned package in `desktop/tools/lint`, with its own lockfile,
+because typescript-eslint supports TypeScript only up to 6.0 while the app
+builds with TypeScript 7; the ESLint parser reads syntax only, which the two
+share. The app's dependencies, its lockfile and the desktop archive never
+include that package. Install it once, then check, under the same guard:
+
+```bash
+npm ci --prefix desktop/tools/lint
+npm run format:check --prefix desktop
+npm run lint --prefix desktop
+```
+
+`npm run format --prefix desktop` rewrites the files in place. Prettier skips
+what `desktop/.gitignore` and `desktop/.prettierignore` list: build output,
+`node_modules` and the npm lockfiles. The one formatting-only commit that
+adopted Prettier is listed in `.git-blame-ignore-revs`; run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once so `git blame`
+skips it.
+
+`python scripts/check_control_chars.py` fails on NUL and every other C0
+control character except tab and line feed, on DEL, and on a carriage return
+outside a CRLF line ending, in every file Git tracks. It recognises binary
+files by suffix only, so a new binary format needs its suffix added to the
+script. Given file names, it checks only those.
+
+`.pre-commit-config.yaml` runs Ruff check and format, the control-character
+check, and the desktop format and lint checks as local hooks. Install them with
+`pre-commit install` and commit from the activated `.venv`, whose `lint` extra
+provides the Ruff version CI pins; the desktop hooks need
+`npm ci --prefix desktop/tools/lint` first, which needs Node.js 22.13 or newer
+(ESLint 10's floor). Agents do not install these hooks: the desktop hooks run
+Node outside the bounded guard, so agents run the same checks as guarded
+units instead.
+
 The installable production provider example has focused Python and prebuilt ESM
 checks:
 
@@ -113,15 +147,18 @@ the shared sidecar modules select `lint`, `core` and `desktop`; the renderer,
 shared and shell stylesheet source under `desktop/src` adds `archive`; the
 Electron main and preload source, the shell page and the other archive and RPM
 inputs select `packaging`; and the files the Fedora probe reads (the example
-plugin and its smoke subset) add `fedora_podman`. The CI infrastructure, the
+plugin and its smoke subset) add `fedora_podman`. The desktop formatter and
+linter package selects `lint` and `desktop`, the pre-commit configuration and
+`.git-blame-ignore-revs` select `lint`, and the control-character check selects
+`lint` and `docs`, both of whose jobs run it. The CI infrastructure, the
 build configuration and any path no rule matches select the full graph.
 `tests/ci/test_ci_plan_drift.py` derives what each job reads from its source
 and fails when a rule no longer covers it.
 
 | Lane | Job |
 |---|---|
-| `docs` | `ci.yml` `Docs build`: the Astro + Starlight site build (`npm run build --prefix site`), the CNAME and repository-only record checks, and the pinned Markdown linter |
-| `lint` | `ci.yml` `Lint, format and CI harness tests`: Ruff over `src/`, `tests/`, `packaging/`, `scripts/release-evidence/` and `examples/`, then the `tests/ci` and `tests/containers` suites, whose report must show no skip |
+| `docs` | `ci.yml` `Docs build`: the Astro + Starlight site build (`npm run build --prefix site`), the CNAME and repository-only record checks, the pinned Markdown linter, and the control-character check |
+| `lint` | `ci.yml` `Lint, format and CI harness tests`: Ruff over `src/`, `tests/`, `packaging/`, `scripts/` and `examples/`, the control-character check, the desktop Prettier check and ESLint, then the `tests/ci` and `tests/containers` suites, whose report must show no skip |
 | `core` | `ci.yml` `Core and MCP`: the core suites listed above, on Python 3.12 and 3.13 on every plan |
 | `fedora_podman` | `ci.yml` `Fedora 44 Podman` probe |
 | `desktop` | `Desktop production evidence`: source identity, the production shell and renderer TAP, installed core, and the native payload job with the integration and packaging contract suites |
@@ -381,8 +418,11 @@ installs exactly, and every direct dependency in `site/package.json`, Astro and
 Starlight included, is an exact version rather than a range; a test in the same
 module enforces both. The lint job installs Ruff from the `lint` extra in
 `pyproject.toml`, which pins it exactly, and `build` comes from the release
-lock. `tests/ci/test_workflow_hygiene.py` requires every package a workflow
-`pip install`s by name to pin one exact version, and rejects `npx`,
+lock. The desktop formatter and linter come from
+`desktop/tools/lint/package-lock.json`, with every direct dependency an exact
+version; `tests/ci/test_lint_tooling_contract.py` enforces that and the lint
+job's install. `tests/ci/test_workflow_hygiene.py` requires every package a
+workflow `pip install`s by name to pin one exact version, and rejects `npx`,
 `npm install`, `pipx`, `uvx` and `uv tool` in workflow steps, so a tool comes
 from a lockfile or a pinned extra.
 
@@ -407,10 +447,13 @@ and allows a follow-up `--no-deps` install without hashes only for local wheels
 and local source trees built with `--no-build-isolation`.
 
 `.github/dependabot.yml` proposes monthly updates to the action pins,
-`pyproject.toml` (the lint extra included) and the `desktop`, `site` and
-`.github/linters` npm lockfiles. Per ecosystem, minor and patch updates arrive
-as one pull request and majors as another. Dependabot adds no labels, because a
-label would rerun CI through the `labeled` event and cancel the first run.
+`pyproject.toml` (the lint extra included), the `desktop`, `site` and
+`.github/linters` npm lockfiles, and the `desktop/tools/lint` lockfile as its
+own entry. Per entry, minor and patch updates arrive as one pull request and
+majors as another. TypeScript in `desktop/tools/lint` takes patch updates only:
+move it by hand once typescript-eslint's peer range allows a newer minor.
+Dependabot adds no labels, because a label would rerun CI through the `labeled`
+event and cancel the first run.
 Electron is not updated by Dependabot: bump it by hand together with the
 pinned version and digests under `packaging/desktop/archive`. Dependabot cannot
 regenerate the uv-compiled hash locks in `requirements/`, so their inputs are

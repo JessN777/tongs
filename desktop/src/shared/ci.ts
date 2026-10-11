@@ -1,14 +1,7 @@
-import type {
-  DesktopRead,
-  OpaqueHandle,
-  ServiceErrorDto,
-} from "./bridge.js";
+import type { DesktopRead, OpaqueHandle, ServiceErrorDto } from "./bridge.js";
 
 export type CIMutationAction =
-  | "retry_pipeline"
-  | "cancel_pipeline"
-  | "retry_job"
-  | "cancel_job";
+  "retry_pipeline" | "cancel_pipeline" | "retry_job" | "cancel_job";
 
 export interface CICapabilityFlags {
   readonly retry_pipeline: boolean;
@@ -56,7 +49,9 @@ export type CIMutationIPCResult =
   | { readonly receipt: null; readonly error: ServiceErrorDto };
 
 export interface CIDesktopBridge {
-  getCICapabilities(repository: OpaqueHandle): DesktopRead<CICapabilitiesResult>;
+  getCICapabilities(
+    repository: OpaqueHandle,
+  ): DesktopRead<CICapabilitiesResult>;
   retryPipeline(params: PipelineMutationParams): Promise<CIMutationReceipt>;
   cancelPipeline(params: PipelineMutationParams): Promise<CIMutationReceipt>;
   retryJob(params: JobMutationParams): Promise<CIMutationReceipt>;

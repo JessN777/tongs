@@ -59,15 +59,24 @@ ruff format --check src/ tests/ packaging/ scripts/ .github/scripts/ examples/
 # Apply formatting to changed Python files when needed
 # ruff format path/to/changed_file.py
 
-# Production desktop dependency install, build/type check, and tests
-npm ci --prefix desktop
-npm run build --prefix desktop
-TONGS_TEST_PYTHON="$(command -v python)" npm test --prefix desktop
-
-# Documentation site install and strict build (output in site/dist)
-npm ci --prefix site
-npm run build --prefix site
+# Control characters in tracked text files (NUL and other C0 controls)
+python scripts/check_control_chars.py
 ```
+
+Every Node command runs only inside the bounded guard described below, one
+unit at a time. For that reason agents do not install the pre-commit hooks,
+whose desktop checks would run Node unguarded; run those checks as guarded
+units instead:
+
+- desktop install, build/type check, and tests: `npm ci --prefix desktop`,
+  `npm run build --prefix desktop`, then
+  `TONGS_TEST_PYTHON="$(command -v python)" npm test --prefix desktop`;
+- desktop format and lint, from their own pinned package:
+  `npm ci --prefix desktop/tools/lint`, then
+  `npm run format:check --prefix desktop` and `npm run lint --prefix desktop`
+  (`npm run format --prefix desktop` rewrites the files);
+- documentation site install and strict build (output in `site/dist`):
+  `npm ci --prefix site`, then `npm run build --prefix site`.
 
 If using `uv`, create the environment with `uv venv --python 3.12`, activate it, and use `uv pip install` in place of `python -m pip install`. Dependency installation may need network access; the mocked tests do not. Ruff comes from the `lint` extra, which pins the exact version the CI lint job uses. The `mcp` extra is needed to run MCP tests instead of skipping them.
 

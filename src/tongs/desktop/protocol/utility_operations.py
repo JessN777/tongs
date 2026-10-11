@@ -12,6 +12,7 @@ from tongs.desktop.protocol.messages import (
     ProtocolErrorCode,
 )
 from tongs.desktop.protocol.state import HandleKind, HandleRegistry
+from tongs.forges.models import JobLogTail
 from tongs.services.models import JobRef, ReviewRef, ReviewSnapshot, ServiceEventKind
 from tongs.services.workspace_utilities import (
     EditorReservation,
@@ -35,7 +36,7 @@ class UtilitySession(Protocol):
 
     async def get_review(self, ref: ReviewRef) -> ReviewSnapshot: ...
 
-    async def get_job_log(self, ref: JobRef) -> str: ...
+    async def get_job_log_tail(self, ref: JobRef, max_bytes: int) -> JobLogTail: ...
 
     async def clear_cache(self) -> None: ...
 
@@ -135,7 +136,7 @@ class UtilityOperations:
         return WorkspaceUtilityService(
             config=self._session.config,
             get_review=self._session.get_review,
-            get_job_log=self._session.get_job_log,
+            get_job_log_tail=self._session.get_job_log_tail,
             clear_cache=self._session.clear_cache,
             reserve_editor_export=self._reservations.reserve,
             release_editor_export=self._reservations.release,

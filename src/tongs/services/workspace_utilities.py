@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets
 import shlex
@@ -14,10 +15,24 @@ from pathlib import PurePath
 from urllib.parse import urlsplit
 
 from tongs.config import Config
+from tongs.forges.models import (
+    JobLogTail,
+    job_log_truncation_note,
+    log_from_line_start,
+)
 from tongs.services.errors import ServiceError, ServiceErrorCode
 from tongs.services.models import JobRef, ReviewRef, ReviewSnapshot
 
 MAX_EDITOR_LOG_BYTES = 4 * 1024 * 1024
+# Room kept for the note that starts a cut export, whose sizes may change by a
+# few digits after a further cut.
+_EDITOR_LOG_NOTE_ROOM = 128
+# Trimming converges in one or two steps; the bound only stops a bad input.
+_EDITOR_LOG_TRIMS = 4
+# An export's JSON-encoded size may be 7/4 of its byte budget: 7 MiB for the
+# 4 MiB default, inside the 8 MiB desktop response frame with room for the
+# rest of the response. Ordinary logs stay far below it.
+_EDITOR_LOG_ENCODED_RATIO = 7
 MAX_EDITOR_COMMAND_BYTES = 16 * 1024
 MAX_EDITOR_ARGUMENTS = 64
 MAX_EDITOR_ARGUMENT_BYTES = 4096
@@ -113,7 +128,7 @@ class WorkspaceUtilityService:
         *,
         config: Config,
         get_review: Callable[[ReviewRef], Awaitable[ReviewSnapshot]],
-        get_job_log: Callable[[JobRef], Awaitable[str]],
+        get_job_log_tail: Callable[[JobRef, int], Awaitable[JobLogTail]],
         clear_cache: Callable[[], Awaitable[None]],
         reserve_editor_export: Callable[
             [int, str], Awaitable[EditorReservation | None]
@@ -127,7 +142,7 @@ class WorkspaceUtilityService:
             raise ValueError("max_editor_log_bytes must be positive")
         self._config = config
         self._get_review = get_review
-        self._get_job_log = get_job_log
+        self._get_job_log_tail = get_job_log_tail
         self._clear_cache = clear_cache
         self._reserve_editor_export = reserve_editor_export
         self._release_editor_export = release_editor_export
@@ -198,25 +213,27 @@ class WorkspaceUtilityService:
                 job,
             )
         try:
-            content = await self._get_job_log(job)
+            # Only the end of the log is read, so a log of any size is held in
+            # bounded memory, as the desktop log view reads it.
+            tail = await self._get_job_log_tail(job, self._max_editor_log_bytes)
         except BaseException:
             await self._release_reservation(reservation)
             raise
-        if not isinstance(content, str):
+        if not isinstance(tail, JobLogTail) or not isinstance(tail.text, str):
             await self._release_reservation(reservation)
             raise ServiceError(
                 ServiceErrorCode.INVALID_RESPONSE,
                 "The forge returned an invalid job log.",
             )
         try:
-            byte_count = len(content.encode("utf-8"))
+            content = _editor_log_content(tail, self._max_editor_log_bytes)
         except UnicodeEncodeError as error:
             await self._release_reservation(reservation)
             raise ServiceError(
                 ServiceErrorCode.INVALID_RESPONSE,
                 "The job log could not be encoded safely.",
             ) from error
-        if byte_count > self._max_editor_log_bytes:
+        if content is None:
             await self._release_reservation(reservation)
             return EditorLogPlan(
                 EditorPlanStatus.LOG_TOO_LARGE,
@@ -327,6 +344,43 @@ class WorkspaceUtilityService:
             "The configured editor launch plan is ready.",
             argv,
         )
+
+
+def _editor_log_content(tail: JobLogTail, budget: int) -> str | None:
+    """Return the export text of ``tail`` within ``budget`` UTF-8 bytes.
+
+    The text must also fit the desktop response frame, where it travels as a
+    JSON string and control characters such as ANSI escapes take up to six
+    bytes each, so its encoded size is capped too. A log over either keeps its
+    end, after the note the desktop log view shows for a cut log, so the
+    editor and the view describe the same cut the same way. ``None`` means
+    the log cannot fit, not even as a note.
+    """
+    encoded_budget = budget * _EDITOR_LOG_ENCODED_RATIO // 4
+    text = tail.text
+    truncated = tail.truncated
+    for _ in range(_EDITOR_LOG_TRIMS):
+        content = (
+            job_log_truncation_note(len(text.encode("utf-8")), tail.total_bytes) + text
+            if truncated
+            else text
+        )
+        excess = max(
+            len(content.encode("utf-8")) - budget,
+            _encoded_size(content) - encoded_budget,
+        )
+        if excess <= 0:
+            return content
+        # Each character adds at least one byte to the measure, so dropping
+        # the excess plus the note's room in characters makes enough space.
+        text = log_from_line_start(text[excess + _EDITOR_LOG_NOTE_ROOM :])
+        truncated = True
+    return None
+
+
+def _encoded_size(text: str) -> int:
+    """Return the bytes ``text`` takes as a JSON string, without the quotes."""
+    return len(json.dumps(text, ensure_ascii=False).encode("utf-8")) - 2
 
 
 def _with_wait_flag(executable: str, argv: tuple[str, ...]) -> tuple[str, ...]:

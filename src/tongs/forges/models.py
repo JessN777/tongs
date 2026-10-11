@@ -262,18 +262,43 @@ class JobLogTail:
         except LookupError:
             text = data.decode("utf-8", errors="replace")
         if truncated and not at_line_start:
-            text = _from_line_start(text)
+            text = log_from_line_start(text)
         encoded_length = len(text.encode("utf-8"))
         if encoded_length > max_bytes:
             # Each character takes at least one byte, so dropping the excess
             # in characters always fits.
-            text = _from_line_start(text[encoded_length - max_bytes :])
+            text = log_from_line_start(text[encoded_length - max_bytes :])
             truncated = True
         return cls(text, total_bytes, truncated)
 
 
-def _from_line_start(text: str) -> str:
-    """Drop a partial first line, unless it is the only line there is."""
+def job_log_truncation_note(shown_bytes: int, total_bytes: int) -> str:
+    """Return the first line that names how much of a cut job log is shown.
+
+    The desktop log view and the editor export both start a cut log with this
+    line, so they describe the same cut in the same words.
+    """
+    total = max(total_bytes, shown_bytes)
+    return (
+        f"[tongs] This job log is {_byte_size(total)}. Showing the last "
+        f"{_byte_size(shown_bytes)}; earlier output is left out.\n"
+    )
+
+
+def _byte_size(count: int) -> str:
+    if count >= 1024 * 1024:
+        return f"{count / (1024 * 1024):.1f} MiB"
+    if count >= 1024:
+        return f"{count / 1024:.1f} KiB"
+    return f"{count} bytes"
+
+
+def log_from_line_start(text: str) -> str:
+    """Drop a cut log's partial first line, unless it is the only line there is.
+
+    Shared by the forge tail, the desktop log view and the editor export, so
+    all three cut a log at the same place.
+    """
     newline = text.find("\n")
     if newline == -1 or newline == len(text) - 1:
         return text.lstrip("�")

@@ -31,10 +31,7 @@ import type {
 } from "../../core/navigation.js";
 import { safeError } from "../../core/presentation.js";
 import { SafeMarkdown } from "../../core/safe-markdown.js";
-import {
-  pendingAnchorLabel,
-  type PendingDraftEntry,
-} from "./pending-card.js";
+import { pendingAnchorLabel, type PendingDraftEntry } from "./pending-card.js";
 import {
   containsSuggestionBlock,
   prepareSuggestionTarget,
@@ -414,7 +411,10 @@ export function useSharedReviewWorkflow(
     if (
       current.displayed.review === review &&
       (durable ||
-        sameComposerRevision(current.displayed.latestObservedRevision, revision))
+        sameComposerRevision(
+          current.displayed.latestObservedRevision,
+          revision,
+        ))
     ) {
       cacheWorkflow(review, current);
       return;
@@ -841,7 +841,8 @@ export function useInlineReviewComposer(
 
   const clearMessage = useCallback(() => setMessage(null), []);
   const quickBlocked =
-    workflow.quick?.status === "sending" || workflow.quick?.status === "unknown";
+    workflow.quick?.status === "sending" ||
+    workflow.quick?.status === "unknown";
   const quickReason = useCallback(
     (anchor: InlineAnchorSelection | null): string | null => {
       if (capabilities === null)
@@ -1289,9 +1290,7 @@ export function useInlineReviewComposer(
           return false;
         } catch (failure) {
           const settled = isUncertainError(failure)
-            ? apply((current) =>
-                markQuickIntentUncertain(current, operationId),
-              )
+            ? apply((current) => markQuickIntentUncertain(current, operationId))
             : apply((current) =>
                 rejectQuickIntent(
                   current,
@@ -1534,7 +1533,9 @@ const ENTRY_GONE_REFUSAL =
  * that clause alone and never in the state they describe.
  */
 function writeAction(anchor: InlineAnchorSelection | null): string {
-  return anchor === null ? "adding a general comment" : "adding inline feedback";
+  return anchor === null
+    ? "adding a general comment"
+    : "adding inline feedback";
 }
 
 function boundElsewhereRefusal(state: ReviewWorkflowState): string {
@@ -1586,12 +1587,12 @@ async function captureAnchor(
   body: string,
 ): Promise<DraftInlineAnchorInputDto> {
   try {
-    return await captureDraftAnchor(anchorSelectionFor(anchor, forge, body), () =>
+    return await captureDraftAnchor(
       anchorSelectionFor(anchor, forge, body),
+      () => anchorSelectionFor(anchor, forge, body),
     );
   } catch (failure) {
-    throw failure instanceof Error &&
-      CAPTURE_REFUSALS.includes(failure.message)
+    throw failure instanceof Error && CAPTURE_REFUSALS.includes(failure.message)
       ? new ComposerRefusal(failure.message)
       : failure;
   }
@@ -1693,9 +1694,10 @@ export function InlineComposer({
     close?.();
   };
   const runPrimary = (): void => {
-    void (editing
-      ? controller.updateEntry(editing.id, body)
-      : controller.addToReview(anchor, body)
+    void (
+      editing
+        ? controller.updateEntry(editing.id, body)
+        : controller.addToReview(anchor, body)
     ).then(settle);
   };
   const runQuick = (): void => {
@@ -1768,7 +1770,10 @@ export function InlineComposer({
           {body.length === 0 ? (
             <small>Nothing to preview yet.</small>
           ) : (
-            <SafeMarkdown source={body} openExternal={controller.openExternal} />
+            <SafeMarkdown
+              source={body}
+              openExternal={controller.openExternal}
+            />
           )}
         </div>
       ) : (

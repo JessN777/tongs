@@ -8,9 +8,17 @@ import pytest
 
 from tongs.config import Config
 from tongs.desktop.protocol.messages import ProtocolError, ProtocolErrorCode
+from tongs.desktop.protocol.server import _MAX_LOG_SNAPSHOT_BYTES
 from tongs.desktop.protocol.state import HandleKind, HandleRegistry
 from tongs.desktop.protocol.utility_operations import UtilityOperations
-from tongs.forges.models import CIStatus, ForgeHost, MRDetail, MRState, User
+from tongs.forges.models import (
+    CIStatus,
+    ForgeHost,
+    JobLogTail,
+    MRDetail,
+    MRState,
+    User,
+)
 from tongs.scanner.repo import ForgeType
 from tongs.services import (
     EditorReservation,
@@ -21,6 +29,7 @@ from tongs.services import (
 )
 from tongs.services.errors import ServiceError, ServiceErrorCode
 from tongs.services.models import ForgeCapabilities, ReviewSnapshot
+from tongs.services.workspace_utilities import MAX_EDITOR_LOG_BYTES
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 REPOSITORY = RepositoryRef("github.com", "acme/widgets")
@@ -34,6 +43,8 @@ class Session:
         self.cache_clears = 0
         self.review_reads: list[ReviewRef] = []
         self.job_reads: list[JobRef] = []
+        self.tail_budgets: list[int] = []
+        self.log = b"safe log\n"
         self.events: list[ServiceEventKind] = []
 
     async def get_review(self, review: ReviewRef) -> ReviewSnapshot:
@@ -70,8 +81,13 @@ class Session:
         )
 
     async def get_job_log(self, job: JobRef) -> str:
+        raise AssertionError("an editor export never reads the whole job log")
+
+    async def get_job_log_tail(self, job: JobRef, max_bytes: int) -> JobLogTail:
+        # As a streaming forge client does, keep only the end of the log.
         self.job_reads.append(job)
-        return "safe log\n"
+        self.tail_budgets.append(max_bytes)
+        return JobLogTail.from_bytes(self.log, len(self.log), max_bytes)
 
     async def clear_cache(self) -> None:
         self.cache_clears += 1
@@ -167,6 +183,34 @@ async def test_editor_export_is_bound_to_exact_issued_job() -> None:
         "export_name": (f"tongs-slot-2-job-31-{reservations.reserved[0][1]}.log"),
     }
     assert session.job_reads == [JOB]
+    assert session.tail_budgets == [MAX_EDITOR_LOG_BYTES]
+
+
+@pytest.mark.asyncio
+async def test_a_log_the_view_shows_whole_exports_its_end_to_the_editor() -> None:
+    # Over the editor budget but within the log view's budget (#447).
+    log = b"".join(f"line {index:07d}\n".encode() for index in range(500_000))
+    assert MAX_EDITOR_LOG_BYTES < len(log) < _MAX_LOG_SNAPSHOT_BYTES
+    session = Session()
+    session.log = log
+    operations, _session, _reservations, _review_handle, job_handle = _operations(
+        session
+    )
+
+    result = await operations.job_log_export({"job": job_handle}, object())
+
+    assert isinstance(result, dict)
+    assert result["status"] == "ready"
+    assert session.tail_budgets == [MAX_EDITOR_LOG_BYTES]
+    content = result["content"]
+    assert isinstance(content, str)
+    note, _, rest = content.partition("\n")
+    assert note.startswith("[tongs] This job log is 6.2 MiB. Showing the last ")
+    assert note.endswith("; earlier output is left out.")
+    assert rest.startswith("line ")
+    assert rest.endswith("line 0499999\n")
+    assert len(content.encode()) <= MAX_EDITOR_LOG_BYTES
+    assert len(rest.encode()) > MAX_EDITOR_LOG_BYTES - 1024
 
 
 @pytest.mark.asyncio

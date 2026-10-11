@@ -1,5 +1,9 @@
 import { EventEmitter } from "node:events";
-import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptions } from "node:child_process";
+import {
+  spawn,
+  type ChildProcessWithoutNullStreams,
+  type SpawnOptions,
+} from "node:child_process";
 import { TextDecoder } from "node:util";
 
 import {
@@ -79,7 +83,10 @@ export const MAX_CONFIGURATION_MESSAGE = 1000;
  * characters become spaces and the text is cut to a fixed length.
  */
 export function configurationFailureMessage(error: unknown): string | null {
-  if (!(error instanceof SidecarError) || error.code !== "configuration_invalid") {
+  if (
+    !(error instanceof SidecarError) ||
+    error.code !== "configuration_invalid"
+  ) {
     return null;
   }
   const text = Array.from(error.message, (character) => {
@@ -149,6 +156,7 @@ const spawnSidecar: SpawnChild = (executable, args, options) =>
  * embeddings, overrides and isolates.
  */
 const UNSAFE_LOG_CHARACTERS =
+  // eslint-disable-next-line no-control-regex -- this pattern matches control characters on purpose.
   /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
 /** Receives one line of the service's diagnostics, already bounded and prefixed. */
@@ -190,7 +198,8 @@ class DiagnosticForwarder {
 
   /** Forwards a last line the service wrote without a newline. */
   end(): void {
-    if (!this.#dropped && (this.#lineBytes > 0 || this.#lineCut)) this.#emitLine();
+    if (!this.#dropped && (this.#lineBytes > 0 || this.#lineCut))
+      this.#emitLine();
   }
 
   #append(part: Buffer): void {
@@ -266,7 +275,11 @@ export class SidecarTransport extends EventEmitter {
   ) {
     super();
     this.launch = validateLaunchConfig(launch);
-    if ([requestTimeoutMs, startupTimeoutMs, shutdownTimeoutMs].some((v) => v <= 0)) {
+    if (
+      [requestTimeoutMs, startupTimeoutMs, shutdownTimeoutMs].some(
+        (v) => v <= 0,
+      )
+    ) {
       throw new Error("Sidecar timeouts must be positive");
     }
   }
@@ -323,7 +336,10 @@ export class SidecarTransport extends EventEmitter {
 
   async start(): Promise<void> {
     if (this.closeRequested) {
-      throw new SidecarError("shutting_down", "The desktop service is stopping.");
+      throw new SidecarError(
+        "shutting_down",
+        "The desktop service is stopping.",
+      );
     }
     if (this.stopping) {
       await this.stopping;
@@ -362,11 +378,17 @@ export class SidecarTransport extends EventEmitter {
 
   async restart(): Promise<void> {
     if (this.closeRequested) {
-      throw new SidecarError("shutting_down", "The desktop service is stopping.");
+      throw new SidecarError(
+        "shutting_down",
+        "The desktop service is stopping.",
+      );
     }
     await this.stopSession();
     if (this.closeRequested) {
-      throw new SidecarError("shutting_down", "The desktop service is stopping.");
+      throw new SidecarError(
+        "shutting_down",
+        "The desktop service is stopping.",
+      );
     }
     await this.start();
   }
@@ -412,16 +434,25 @@ export class SidecarTransport extends EventEmitter {
         windowsHide: true,
       });
     } catch {
-      throw new SidecarError("start_failed", "The desktop service could not start.");
+      throw new SidecarError(
+        "start_failed",
+        "The desktop service could not start.",
+      );
     }
     this.child = child;
     const generation = this.generation;
-    child.stdout.on("data", (chunk: Buffer) => this.consume(child, generation, chunk));
+    child.stdout.on("data", (chunk: Buffer) =>
+      this.consume(child, generation, chunk),
+    );
     const diagnostics = new DiagnosticForwarder(this.diagnostics);
     child.stderr.on("data", (chunk: Buffer) => diagnostics.write(chunk));
     child.stderr.once("end", () => diagnostics.end());
-    child.once("error", () => this.failConnection(child, generation, "start_failed"));
-    child.once("exit", (code, signal) => this.onExit(child, generation, code, signal));
+    child.once("error", () =>
+      this.failConnection(child, generation, "start_failed"),
+    );
+    child.once("exit", (code, signal) =>
+      this.onExit(child, generation, code, signal),
+    );
 
     const handshake = this.request<HandshakeResult>(
       "handshake",
@@ -448,7 +479,11 @@ export class SidecarTransport extends EventEmitter {
       await this.stopSession();
       throw error;
     }
-    if (this.child === child && this.generation === generation && !this.failureReported) {
+    if (
+      this.child === child &&
+      this.generation === generation &&
+      !this.failureReported
+    ) {
       this.notRunningReported = false;
       if (colorScheme !== this.colorScheme) {
         this.colorScheme = colorScheme;
@@ -475,20 +510,33 @@ export class SidecarTransport extends EventEmitter {
     if (!this.child?.stdin.writable || this.failureReported) {
       // A request that finds no service outside a shutdown or a deliberate
       // stop tells the app once per lost session, so it can restart it.
-      if (!this.closeRequested && !this.expectedExit && !this.notRunningReported) {
+      if (
+        !this.closeRequested &&
+        !this.expectedExit &&
+        !this.notRunningReported
+      ) {
         this.notRunningReported = true;
         queueMicrotask(() => this.emit("not_running"));
       }
-      throw new SidecarError("not_running", "The desktop service is not running.");
+      throw new SidecarError(
+        "not_running",
+        "The desktop service is not running.",
+      );
     }
     if (this.pending.size >= MAX_PENDING) {
-      throw new SidecarError("too_many_requests", "Too many desktop requests are pending.");
+      throw new SidecarError(
+        "too_many_requests",
+        "Too many desktop requests are pending.",
+      );
     }
     validateJson(params, this.jsonLimits);
     const requestId = `electron-${this.generation}-${this.nextId}`;
     this.nextId = this.nextId === Number.MAX_SAFE_INTEGER ? 1 : this.nextId + 1;
     if (this.pending.has(requestId)) {
-      throw new SidecarError("request_id_exhausted", "Desktop request IDs are exhausted.");
+      throw new SidecarError(
+        "request_id_exhausted",
+        "Desktop request IDs are exhausted.",
+      );
     }
     let resolvePromise!: (value: T) => void;
     let rejectPromise!: (error: Error) => void;
@@ -511,7 +559,13 @@ export class SidecarTransport extends EventEmitter {
       timer,
     });
     try {
-      this.writeFrame({ v: PROTOCOL_MAJOR, type: "request", id: requestId, method, params });
+      this.writeFrame({
+        v: PROTOCOL_MAJOR,
+        type: "request",
+        id: requestId,
+        method,
+        params,
+      });
     } catch (error) {
       clearTimeout(timer);
       this.pending.delete(requestId);
@@ -523,27 +577,44 @@ export class SidecarTransport extends EventEmitter {
   private writeFrame(frame: JsonObject): void {
     const bytes = Buffer.from(`${JSON.stringify(frame)}\n`, "utf8");
     if (bytes.length > MAX_REQUEST_BYTES) {
-      throw new SidecarError("request_too_large", "The desktop request is too large.");
+      throw new SidecarError(
+        "request_too_large",
+        "The desktop request is too large.",
+      );
     }
     const child = this.child;
     const generation = this.generation;
-    if (!child?.stdin.writable) throw new SidecarError("not_running", "The desktop service is not running.");
+    if (!child?.stdin.writable)
+      throw new SidecarError(
+        "not_running",
+        "The desktop service is not running.",
+      );
     child.stdin.write(bytes, (error) => {
       if (error) this.failConnection(child, generation, "write_failed");
     });
   }
 
-  private consume(child: ChildProcessWithoutNullStreams, generation: number, chunk: Buffer): void {
+  private consume(
+    child: ChildProcessWithoutNullStreams,
+    generation: number,
+    chunk: Buffer,
+  ): void {
     // A failed connection reads nothing more: the child is being stopped, and
     // a frame after the bad one must not reach a listener.
-    if (this.child !== child || this.generation !== generation || this.failureReported) return;
+    if (
+      this.child !== child ||
+      this.generation !== generation ||
+      this.failureReported
+    )
+      return;
     let start = 0;
     while (true) {
       // Only the new chunk is scanned: the held tail is known to hold no newline.
       const newline = chunk.indexOf(0x0a, start);
       if (newline < 0) {
         this.holdPartial(chunk.subarray(start));
-        if (this.partialLength > MAX_RESPONSE_BYTES) this.failConnection(child, generation, "frame_too_large");
+        if (this.partialLength > MAX_RESPONSE_BYTES)
+          this.failConnection(child, generation, "frame_too_large");
         return;
       }
       const raw = this.takeFrame(chunk.subarray(start, newline));
@@ -554,7 +625,12 @@ export class SidecarTransport extends EventEmitter {
         return;
       }
       this.consumeFrame(child, generation, raw);
-      if (this.child !== child || this.generation !== generation || this.failureReported) return;
+      if (
+        this.child !== child ||
+        this.generation !== generation ||
+        this.failureReported
+      )
+        return;
     }
   }
 
@@ -568,13 +644,20 @@ export class SidecarTransport extends EventEmitter {
   private takeFrame(last: Buffer): Buffer {
     if (this.partialChunks.length === 0) return last;
     this.partialChunks.push(last);
-    const raw = Buffer.concat(this.partialChunks, this.partialLength + last.length);
+    const raw = Buffer.concat(
+      this.partialChunks,
+      this.partialLength + last.length,
+    );
     this.partialChunks = [];
     this.partialLength = 0;
     return raw;
   }
 
-  private consumeFrame(child: ChildProcessWithoutNullStreams, generation: number, raw: Buffer): void {
+  private consumeFrame(
+    child: ChildProcessWithoutNullStreams,
+    generation: number,
+    raw: Buffer,
+  ): void {
     let value: unknown;
     try {
       value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
@@ -585,12 +668,19 @@ export class SidecarTransport extends EventEmitter {
     try {
       validateJson(value, this.jsonLimits);
     } catch (error) {
-      if (!(error instanceof JsonLimitError) || !this.failOversizedResponse(value)) {
+      if (
+        !(error instanceof JsonLimitError) ||
+        !this.failOversizedResponse(value)
+      ) {
         this.failConnection(child, generation, "invalid_frame");
       }
       return;
     }
-    if (!isRecord(value) || value.v !== PROTOCOL_MAJOR || typeof value.type !== "string") {
+    if (
+      !isRecord(value) ||
+      value.v !== PROTOCOL_MAJOR ||
+      typeof value.type !== "string"
+    ) {
       this.failConnection(child, generation, "invalid_frame");
       return;
     }
@@ -604,7 +694,10 @@ export class SidecarTransport extends EventEmitter {
         name: value.event,
         data: value.data as JsonValue,
       };
-      if (this.lastEventSequence && event.sequence !== this.lastEventSequence + 1) {
+      if (
+        this.lastEventSequence &&
+        event.sequence !== this.lastEventSequence + 1
+      ) {
         this.emit("event", {
           sequence: event.sequence,
           name: "protocol.resync_required",
@@ -632,7 +725,9 @@ export class SidecarTransport extends EventEmitter {
     pending.reject(
       new SidecarError(
         code,
-        typeof error.message === "string" ? error.message : "The desktop request failed.",
+        typeof error.message === "string"
+          ? error.message
+          : "The desktop request failed.",
         error.retryable === true,
       ),
     );
@@ -679,10 +774,23 @@ export class SidecarTransport extends EventEmitter {
     return true;
   }
 
-  private failConnection(child: ChildProcessWithoutNullStreams, generation: number, code: string): void {
-    if (this.child !== child || this.generation !== generation || this.failureReported) return;
+  private failConnection(
+    child: ChildProcessWithoutNullStreams,
+    generation: number,
+    code: string,
+  ): void {
+    if (
+      this.child !== child ||
+      this.generation !== generation ||
+      this.failureReported
+    )
+      return;
     this.failureReported = true;
-    const error = new SidecarError(code, "The desktop service connection failed.", true);
+    const error = new SidecarError(
+      code,
+      "The desktop service connection failed.",
+      true,
+    );
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(error);
@@ -696,22 +804,33 @@ export class SidecarTransport extends EventEmitter {
     if (!this.expectedExit) this.emit("crash", error);
   }
 
-  private onExit(child: ChildProcessWithoutNullStreams, generation: number, code: number | null, signal: NodeJS.Signals | null): void {
+  private onExit(
+    child: ChildProcessWithoutNullStreams,
+    generation: number,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): void {
     if (this.child !== child || this.generation !== generation) return;
     const unexpected = !this.expectedExit;
     this.crashHistory.push({ code, signal, unexpected });
     if (this.crashHistory.length > MAX_CRASH_HISTORY) this.crashHistory.shift();
-    if (unexpected && !this.failureReported) this.failConnection(child, generation, "unexpected_eof");
+    if (unexpected && !this.failureReported)
+      this.failConnection(child, generation, "unexpected_eof");
     this.child = null;
   }
 
-  private async reapBeforeReplacement(child: ChildProcessWithoutNullStreams): Promise<void> {
+  private async reapBeforeReplacement(
+    child: ChildProcessWithoutNullStreams,
+  ): Promise<void> {
     if (await waitForExit(child, this.shutdownTimeoutMs)) return;
     if (!child.killed) child.kill("SIGTERM");
     if (await waitForExit(child, 1_000)) return;
     child.kill("SIGKILL");
     if (!(await waitForExit(child, 1_000))) {
-      throw new SidecarError("reap_failed", "The prior desktop service did not stop.");
+      throw new SidecarError(
+        "reap_failed",
+        "The prior desktop service did not stop.",
+      );
     }
   }
 
@@ -719,7 +838,10 @@ export class SidecarTransport extends EventEmitter {
     const child = this.child;
     this.expectedExit = true;
     this.setState("stopped");
-    const stopped = new SidecarError("shutting_down", "The desktop service is stopping.");
+    const stopped = new SidecarError(
+      "shutting_down",
+      "The desktop service is stopping.",
+    );
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(stopped);
@@ -772,14 +894,18 @@ export class ServiceStatusPublisher {
    * it gave up, so the status line can say which; the renderer reads it as
    * optional.
    */
-  get current(): ServiceStatusDto & { readonly recovery?: ServiceRecoveryState } {
+  get current(): ServiceStatusDto & {
+    readonly recovery?: ServiceRecoveryState;
+  } {
     // Notices outlive a stopped session: they are this app run's warnings.
     const status = {
       state: this.#state,
       revision: this.#revision,
       notices: [...this.source.serviceNotices],
     };
-    return this.#recovery === "idle" ? status : { ...status, recovery: this.#recovery };
+    return this.#recovery === "idle"
+      ? status
+      : { ...status, recovery: this.#recovery };
   }
 
   start(): void {
@@ -805,7 +931,8 @@ export class ServiceStatusPublisher {
 
   dispose(): void {
     if (this.#listener) this.source.off("status", this.#listener);
-    if (this.#recoveryListener) this.source.off("recovery", this.#recoveryListener);
+    if (this.#recoveryListener)
+      this.source.off("recovery", this.#recoveryListener);
     this.#listener = null;
     this.#recoveryListener = null;
   }
@@ -879,10 +1006,17 @@ const MAX_SERVICE_NOTICE_LENGTH = 1000;
  * is only cut down, so one long notice cannot stop the service from starting.
  */
 function handshakeNotices(value: JsonValue): readonly string[] {
-  if (!isRecord(value) || value.recovery_warnings === undefined) return NO_NOTICES;
+  if (!isRecord(value) || value.recovery_warnings === undefined)
+    return NO_NOTICES;
   const warnings = value.recovery_warnings;
-  if (!Array.isArray(warnings) || !warnings.every((warning) => typeof warning === "string")) {
-    throw new SidecarError("incompatible_handshake", "The desktop service is incompatible.");
+  if (
+    !Array.isArray(warnings) ||
+    !warnings.every((warning) => typeof warning === "string")
+  ) {
+    throw new SidecarError(
+      "incompatible_handshake",
+      "The desktop service is incompatible.",
+    );
   }
   const notices = (warnings as string[])
     .filter((warning) => warning.length > 0)
@@ -899,7 +1033,10 @@ function handshakeNotices(value: JsonValue): readonly string[] {
 function handshakeColorScheme(value: JsonValue): ColorScheme {
   if (!isRecord(value) || value.color_scheme === undefined) return "system";
   if (!isColorScheme(value.color_scheme)) {
-    throw new SidecarError("incompatible_handshake", "The desktop service is incompatible.");
+    throw new SidecarError(
+      "incompatible_handshake",
+      "The desktop service is incompatible.",
+    );
   }
   return value.color_scheme;
 }
@@ -910,7 +1047,10 @@ function mergeNotices(
   added: readonly string[],
 ): readonly string[] {
   if (added.length === 0) return kept;
-  const merged = [...new Set([...kept, ...added])].slice(0, MAX_SERVICE_NOTICES);
+  const merged = [...new Set([...kept, ...added])].slice(
+    0,
+    MAX_SERVICE_NOTICES,
+  );
   return merged.length === kept.length ? kept : Object.freeze(merged);
 }
 
@@ -928,7 +1068,8 @@ function truncateNotice(text: string): string {
 }
 
 function validateHandshake(value: JsonValue, coreVersion: string): JsonLimits {
-  if (!isRecord(value)) throw new SidecarError("invalid_handshake", "Invalid desktop handshake.");
+  if (!isRecord(value))
+    throw new SidecarError("invalid_handshake", "Invalid desktop handshake.");
   const required = [...REQUIRED_CAPABILITIES].sort();
   const capabilities = stringArray(value.capabilities);
   const accepted = stringArray(value.accepted_capabilities);
@@ -938,7 +1079,7 @@ function validateHandshake(value: JsonValue, coreVersion: string): JsonLimits {
     value.core_version !== coreVersion ||
     typeof value.session_id !== "string" ||
     value.session_id.length < 16 ||
-      !required.every((capability) => capabilities.includes(capability)) ||
+    !required.every((capability) => capabilities.includes(capability)) ||
     JSON.stringify(accepted) !== JSON.stringify(required) ||
     !REQUIRED_METHODS.every((method) => methods.includes(method)) ||
     !isRecord(value.limits) ||
@@ -949,7 +1090,10 @@ function validateHandshake(value: JsonValue, coreVersion: string): JsonLimits {
     value.limits.queued_events !== MAX_QUEUED_EVENTS ||
     value.limits.asset_chunk_bytes !== MAX_ASSET_CHUNK_BYTES
   ) {
-    throw new SidecarError("incompatible_handshake", "The desktop service is incompatible.");
+    throw new SidecarError(
+      "incompatible_handshake",
+      "The desktop service is incompatible.",
+    );
   }
   return negotiatedJsonLimits(value.limits);
 }
@@ -978,33 +1122,70 @@ function negotiatedJsonLimits(limits: Record<string, unknown>): JsonLimits {
   return Object.freeze({ values: Number(values), depth: Number(depth) });
 }
 
-const REQUIRED_METHODS = Object.freeze([
-  "assets.list", "assets.read", "ci.capabilities", "ci.receipt", "commits.list", "diff.open", "diff.page",
-  "discussions.list", "discussions.page", "host.set_location", "jobs.list", "logs.open", "logs.page",
-  "jobs.cancel", "jobs.retry", "pipelines.cancel", "pipelines.list", "pipelines.retry",
-  "plugins.invoke", "plugins.list", "repositories.discover",
-  "repositories.open", "review_pipelines.list", "reviews.ci_status", "reviews.get", "reviews.list", "shutdown",
-  ...UTILITY_PROTOCOL_METHODS,
-  ...REVIEW_OPERATIONS.map((operation) => operation.method),
-].sort());
+const REQUIRED_METHODS = Object.freeze(
+  [
+    "assets.list",
+    "assets.read",
+    "ci.capabilities",
+    "ci.receipt",
+    "commits.list",
+    "diff.open",
+    "diff.page",
+    "discussions.list",
+    "discussions.page",
+    "host.set_location",
+    "jobs.list",
+    "logs.open",
+    "logs.page",
+    "jobs.cancel",
+    "jobs.retry",
+    "pipelines.cancel",
+    "pipelines.list",
+    "pipelines.retry",
+    "plugins.invoke",
+    "plugins.list",
+    "repositories.discover",
+    "repositories.open",
+    "review_pipelines.list",
+    "reviews.ci_status",
+    "reviews.get",
+    "reviews.list",
+    "shutdown",
+    ...UTILITY_PROTOCOL_METHODS,
+    ...REVIEW_OPERATIONS.map((operation) => operation.method),
+  ].sort(),
+);
 
-function validResponse(value: Record<string, unknown>): value is Record<string, JsonValue> & { id: string } {
+function validResponse(
+  value: Record<string, unknown>,
+): value is Record<string, JsonValue> & { id: string } {
   return (
     typeof value.id === "string" &&
-    (Object.hasOwn(value, "result") !== Object.hasOwn(value, "error")) &&
+    Object.hasOwn(value, "result") !== Object.hasOwn(value, "error") &&
     (!Object.hasOwn(value, "error") || isRecord(value.error))
   );
 }
 
-function validEvent(value: Record<string, unknown>): value is Record<string, unknown> & {
-  sequence: number; event: string; data: JsonValue;
+function validEvent(value: Record<string, unknown>): value is Record<
+  string,
+  unknown
+> & {
+  sequence: number;
+  event: string;
+  data: JsonValue;
 } {
-  return Number.isSafeInteger(value.sequence) && Number(value.sequence) > 0 &&
-    typeof value.event === "string" && value.event.length <= 120 && Object.hasOwn(value, "data");
+  return (
+    Number.isSafeInteger(value.sequence) &&
+    Number(value.sequence) > 0 &&
+    typeof value.event === "string" &&
+    value.event.length <= 120 &&
+    Object.hasOwn(value, "data")
+  );
 }
 
 function stringArray(value: unknown): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string"))
+    return [];
   return [...value].sort();
 }
 
@@ -1020,10 +1201,13 @@ function validateJson(
 ): asserts value is JsonValue {
   // The same whole-frame budget the sidecar applies: at most `limits.values`
   // values, and nothing nested deeper than `limits.depth` below the frame.
-  if (depth > limits.depth) throw new JsonLimitError("JSON is nested too deeply");
+  if (depth > limits.depth)
+    throw new JsonLimitError("JSON is nested too deeply");
   budget.items += 1;
-  if (budget.items > limits.values) throw new JsonLimitError("JSON has too many values");
-  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (budget.items > limits.values)
+    throw new JsonLimitError("JSON has too many values");
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return;
   if (typeof value === "number" && Number.isFinite(value)) return;
   if (Array.isArray(value)) {
     for (const item of value) validateJson(item, limits, depth + 1, budget);
@@ -1031,12 +1215,16 @@ function validateJson(
   }
   if (!isRecord(value)) throw new Error("invalid JSON");
   for (const [key, item] of Object.entries(value)) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") throw new Error("invalid JSON key");
+    if (key === "__proto__" || key === "constructor" || key === "prototype")
+      throw new Error("invalid JSON key");
     validateJson(item, limits, depth + 1, budget);
   }
 }
 
-async function waitForExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
+async function waitForExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) return true;
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), timeoutMs);

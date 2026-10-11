@@ -29,7 +29,8 @@ export const TOO_LARGE_TO_SHOW =
 export function safeError(error: unknown): string {
   const failure = serviceErrorOf(error);
   if (failure === null) return UNREPORTED_READ;
-  const cause = typeof failure.message === "string" ? failure.message.trim() : "";
+  const cause =
+    typeof failure.message === "string" ? failure.message.trim() : "";
   if (failure.code === RESPONSE_TOO_LARGE) return TOO_LARGE_TO_SHOW;
   if (failure.code === "snapshot_expired")
     return "This diff snapshot expired. Reload the diff to continue.";

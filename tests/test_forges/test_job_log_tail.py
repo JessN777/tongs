@@ -11,8 +11,8 @@ from tongs.errors import NetworkError, NotFoundError
 from tongs.forges.base import ForgeClient
 from tongs.forges.github import GitHubClient
 from tongs.forges.gitlab import GitLabClient
-from tongs.forges.http import request_log_tail
-from tongs.forges.models import ForgeHost, JobLogTail
+from tongs.forges.http import _LogTailBuffer, request_log_tail
+from tongs.forges.models import ForgeHost, JobLogTail, job_log_truncation_note
 from tongs.scanner.repo import ForgeType
 
 _GITHUB = ForgeHost("github.com", ForgeType.GITHUB, "https://api.github.com")
@@ -87,6 +87,46 @@ def test_a_tail_of_a_longer_stream_is_marked_truncated() -> None:
     assert tail.truncated
     assert tail.total_bytes == 1000
     assert tail.text == "last\n"
+
+
+def test_the_truncation_note_names_both_sizes() -> None:
+    assert job_log_truncation_note(512, 6 * 1024 * 1024) == (
+        "[tongs] This job log is 6.0 MiB. Showing the last 512 bytes; "
+        "earlier output is left out.\n"
+    )
+    assert job_log_truncation_note(2048, 10).startswith(
+        "[tongs] This job log is 2.0 KiB."
+    )
+
+
+# The tail buffer
+
+
+@pytest.mark.parametrize("chunk_size", [1, 997, 4096])
+def test_the_tail_buffer_holds_at_most_the_budget_plus_one_chunk(
+    chunk_size: int,
+) -> None:
+    data = _log_lines(2_000)
+    keep = 1001
+    buffer = _LogTailBuffer(keep)
+
+    for start in range(0, len(data), chunk_size):
+        buffer.append(data[start : start + chunk_size])
+        assert buffer.held <= keep + chunk_size
+        assert buffer.held >= min(keep, buffer.total)
+
+    assert buffer.total == len(data)
+    assert buffer.data() == data[len(data) - buffer.held :]
+
+
+def test_the_tail_buffer_ignores_empty_chunks() -> None:
+    buffer = _LogTailBuffer(4)
+
+    buffer.append(b"")
+    buffer.append(b"abc")
+    buffer.append(b"")
+
+    assert (buffer.total, buffer.held, buffer.data()) == (3, 3, b"abc")
 
 
 # request_log_tail

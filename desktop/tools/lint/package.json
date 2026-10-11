@@ -1,0 +1,22 @@
+{
+  "name": "tongs-desktop-lint",
+  "private": true,
+  "description": "Pinned formatter and linter for the desktop sources; install with npm ci.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "format": "cd ../.. && prettier --write .",
+    "format:check": "cd ../.. && prettier --check .",
+    "lint": "cd ../.. && eslint --config tools/lint/eslint.config.mjs --max-warnings 0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "prettier": "3.9.9",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0"
+  }
+}

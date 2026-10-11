@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Callable
 from email.utils import parsedate_to_datetime
 
@@ -625,9 +626,9 @@ async def request_log_tail(
 ) -> JobLogTail:
     """GET a log at ``path`` and keep only its last ``max_bytes`` bytes.
 
-    The body is streamed into a tail buffer that never holds more than twice
-    the budget plus one chunk, so a log of any size is read in bounded memory
-    and a log over the budget yields its end instead of an error. Bytes are
+    The body is streamed into a tail buffer that never holds more than the
+    budget plus one chunk, so a log of any size is read in bounded memory and
+    a log over the budget yields its end instead of an error. Bytes are
     counted after any content decoding, which is the size of the text. The
     client's redirect policy applies as it does to ``client.get``, so a GitHub
     log follows its redirect to blob storage. An error status is mapped with
@@ -640,22 +641,48 @@ async def request_log_tail(
             if response.status_code >= 400:
                 body = await _read_prefix(response, ERROR_BODY_LIMIT)
                 raise map_http_error(_error_response(response, body))
-            tail = bytearray()
-            total = 0
+            # One byte before the budget shows whether the cut falls on a
+            # line start.
+            tail = _LogTailBuffer(max_bytes + 1)
             async for chunk in response.aiter_bytes():
-                total += len(chunk)
-                tail.extend(chunk)
-                if len(tail) > 2 * max_bytes + 1:
-                    # One byte before the budget shows whether the cut
-                    # falls on a line start.
-                    del tail[: len(tail) - max_bytes - 1]
+                tail.append(chunk)
             encoding = response.charset_encoding or "utf-8"
     except httpx.TimeoutException as e:
         raise NetworkError(f"Request timed out: {redact_credentials(str(e))}") from e
     except httpx.RequestError as e:
         # Also a body that fails to decode partway through the stream.
         raise NetworkError(f"Transport error: {redact_credentials(str(e))}") from e
-    return JobLogTail.from_bytes(bytes(tail), total, max_bytes, encoding)
+    return JobLogTail.from_bytes(tail.data(), tail.total, max_bytes, encoding)
+
+
+class _LogTailBuffer:
+    """The end of a byte stream, held as the whole chunks it arrived in.
+
+    A chunk is dropped only once the chunks after it hold ``keep`` bytes, so
+    the buffer never holds more than ``keep`` bytes plus one chunk, and a
+    dropped chunk is never copied.
+    """
+
+    def __init__(self, keep: int) -> None:
+        if keep <= 0:
+            raise ValueError("keep must be positive")
+        self._keep = keep
+        self._chunks: deque[bytes] = deque()
+        self.held = 0
+        self.total = 0
+
+    def append(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        chunk = bytes(chunk)
+        self.total += len(chunk)
+        self.held += len(chunk)
+        self._chunks.append(chunk)
+        while self.held - len(self._chunks[0]) >= self._keep:
+            self.held -= len(self._chunks.popleft())
+
+    def data(self) -> bytes:
+        return b"".join(self._chunks)
 
 
 async def _read_prefix(response: httpx.Response, limit: int) -> bytes:

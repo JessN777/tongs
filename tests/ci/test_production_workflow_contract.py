@@ -509,12 +509,14 @@ def test_the_deploy_builds_exactly_what_the_docs_lane_checks(
     }
     build = docs["jobs"]["build"]
     # The lane runs the deploy's build, then its own Markdown lint, which
-    # test_docs_lane_contract pins.
+    # test_docs_lane_contract pins, and the control-character check, which
+    # test_lint_tooling_contract pins.
     deploy_commands = _run_commands(build)
     lane_commands = _run_commands(ci["jobs"]["docs"])
     assert lane_commands[: len(deploy_commands)] == deploy_commands
     assert all(
         ".github/linters" in command
+        or command == "python3 scripts/check_control_chars.py"
         for command in lane_commands[len(deploy_commands) :]
     )
     assert _setup_node_inputs(build) == _setup_node_inputs(ci["jobs"]["docs"])

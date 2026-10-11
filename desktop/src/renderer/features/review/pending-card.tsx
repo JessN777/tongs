@@ -132,6 +132,10 @@ export function PendingCard({
  */
 export function PendingCardMirror(): ReactNode {
   return (
-    <div className="pending-card-mirror" role="presentation" aria-hidden="true" />
+    <div
+      className="pending-card-mirror"
+      role="presentation"
+      aria-hidden="true"
+    />
   );
 }
