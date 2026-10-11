@@ -502,8 +502,8 @@ test("log reconstruction enforces identity, revision, line, and text bounds", as
   assert.equal(loaded.lines.length, 50_000);
   assert.equal(loaded.lines[0], "x");
   assert.equal(loaded.lines.at(-1), "x");
-  assert.equal(loaded.partialError.code, "pagination_limit");
-  assert.match(loaded.partialError.message, /^Showing the end of this job log\./);
+  assert.equal(loaded.partialError, null);
+  assert.match(loaded.notice, /^Showing the end of this job log\./);
   assert.equal(sanitizeLogText("safe\u0000\u001b[31mred\u001b[0m"), "safe�red");
 
   const small = {
@@ -514,6 +514,7 @@ test("log reconstruction enforces identity, revision, line, and text bounds", as
   const whole = await loadLogPages("job", small, new QueryCoordinator(small));
   assert.deepEqual([...whole.lines], ["one", "two"]);
   assert.equal(whole.partialError, null);
+  assert.equal(whole.notice, null);
 
   const inconsistent = {
     cancelRead: async () => true,
@@ -564,8 +565,24 @@ test("a log past the character limit keeps its end from a line start", async () 
     loaded.lines.reduce((total, line) => total + line.length + 1, 0) <= 8 * 1024 * 1024,
     true,
   );
-  assert.equal(loaded.partialError.code, "pagination_limit");
-  assert.match(loaded.partialError.message, /^Showing the end of this job log\./);
+  assert.equal(loaded.partialError, null);
+  assert.match(loaded.notice, /^Showing the end of this job log\./);
+});
+
+test("the end of a long log is shown as information, not as an error (#447)", async () => {
+  const bridge = baseBridge({
+    openLog: ({ job: handle }) =>
+      read(logPage(handle, 0, null, `${"x\n".repeat(50_000)}the build failed here\n`)),
+  });
+  const view = renderFeature(bridge);
+
+  const shown = /^Showing the end of this job log\./;
+  await view.findByText("50000 lines");
+  assert.equal(view.queryAllByText(shown).length, 1);
+  assert.equal(view.getByText(shown).getAttribute("role"), "status");
+  assert.equal(view.getByText(shown).getAttribute("class"), "notice notice-status");
+  assert.equal(view.queryAllByRole("alert").length, 0);
+  assert.equal(document.querySelectorAll(".notice-error").length, 0);
 });
 
 test("known pre-dispatch failures and ambiguous transport failures stay distinct", () => {
