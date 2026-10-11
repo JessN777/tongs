@@ -205,8 +205,10 @@ search keys act only on this view, so they are ignored while a dialog such as
 **Clear shared API cache?** is open.
 
 **Open log in editor**, bound to ++f2++ while the log is loaded and no text
-field holds the keyboard, starts the configured graphical editor on a private, bounded export of the log. The
-control reads **Starting editor…** while the editor starts. Starting the editor
+field holds the keyboard, starts the configured graphical editor on a private, bounded export of the log.
+A log over 4 MiB exports its last part, after a first line such as
+`[tongs] This job log is 12.0 MiB. Showing the last 4.0 MiB; earlier output is left out.`
+The control reads **Starting editor…** while the editor starts. Starting the editor
 process is reported separately from any confirmation that the editor read the
 file, and closing tongs does not stop the editor. The
 [configuration reference](/reference/configuration/) lists the supported editor

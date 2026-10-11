@@ -94,6 +94,7 @@ from tongs.forges.models import (
     Pipeline,
     PipelineJob,
     job_log_truncation_note,
+    log_from_line_start,
 )
 from tongs.plugins.desktop import (
     DesktopCallContext,
@@ -2357,7 +2358,7 @@ def _log_snapshot(
             return revision, entries
         # Each character adds at least one byte to the measure, so dropping
         # the excess plus the note's room in characters makes enough space.
-        text = _log_from_line_start(text[excess + _LOG_NOTE_ROOM :])
+        text = log_from_line_start(text[excess + _LOG_NOTE_ROOM :])
         truncated = True
     raise ProtocolError(
         ProtocolErrorCode.RESPONSE_TOO_LARGE,
@@ -2367,13 +2368,6 @@ def _log_snapshot(
 
 def _log_truncation_note(text: str, total_bytes: int) -> str:
     return job_log_truncation_note(len(text.encode("utf-8")), total_bytes)
-
-
-def _log_from_line_start(text: str) -> str:
-    newline = text.find("\n")
-    if newline == -1 or newline == len(text) - 1:
-        return text
-    return text[newline + 1 :]
 
 
 def _log_entries(encoded: bytes) -> tuple[JsonObject, ...]:

@@ -64,7 +64,9 @@ python scripts/check_control_chars.py
 ```
 
 Every Node command runs only inside the bounded guard described below, one
-unit at a time:
+unit at a time. For that reason agents do not install the pre-commit hooks,
+whose desktop checks would run Node unguarded; run those checks as guarded
+units instead:
 
 - desktop install, build/type check, and tests: `npm ci --prefix desktop`,
   `npm run build --prefix desktop`, then

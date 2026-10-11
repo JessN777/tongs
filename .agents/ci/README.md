@@ -82,7 +82,10 @@ script. Given file names, it checks only those.
 check, and the desktop format and lint checks as local hooks. Install them with
 `pre-commit install` and commit from the activated `.venv`, whose `lint` extra
 provides the Ruff version CI pins; the desktop hooks need
-`npm ci --prefix desktop/tools/lint` first.
+`npm ci --prefix desktop/tools/lint` first, which needs Node.js 22.13 or newer
+(ESLint 10's floor). Agents do not install these hooks: the desktop hooks run
+Node outside the bounded guard, so agents run the same checks as guarded
+units instead.
 
 The installable production provider example has focused Python and prebuilt ESM
 checks:

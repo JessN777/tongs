@@ -95,7 +95,8 @@ reformatted the whole desktop tree; to keep it out of `git blame`, run
 
 `.pre-commit-config.yaml` runs the same Ruff, control-character and desktop
 checks as CI before each commit. With your `.venv` active (it provides the
-pinned Ruff) and the desktop lint package installed:
+pinned Ruff) and the desktop lint package installed (it needs Node.js 22.13
+or newer):
 
 ```bash
 python -m pip install pre-commit

@@ -3,6 +3,9 @@
   "private": true,
   "description": "Pinned formatter and linter for the desktop sources; install with npm ci.",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "format": "cd ../.. && prettier --write .",
     "format:check": "cd ../.. && prettier --check .",

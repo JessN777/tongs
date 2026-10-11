@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets
 import shlex
@@ -14,7 +15,11 @@ from pathlib import PurePath
 from urllib.parse import urlsplit
 
 from tongs.config import Config
-from tongs.forges.models import JobLogTail, job_log_truncation_note
+from tongs.forges.models import (
+    JobLogTail,
+    job_log_truncation_note,
+    log_from_line_start,
+)
 from tongs.services.errors import ServiceError, ServiceErrorCode
 from tongs.services.models import JobRef, ReviewRef, ReviewSnapshot
 
@@ -22,6 +27,12 @@ MAX_EDITOR_LOG_BYTES = 4 * 1024 * 1024
 # Room kept for the note that starts a cut export, whose sizes may change by a
 # few digits after a further cut.
 _EDITOR_LOG_NOTE_ROOM = 128
+# Trimming converges in one or two steps; the bound only stops a bad input.
+_EDITOR_LOG_TRIMS = 4
+# An export's JSON-encoded size may be 7/4 of its byte budget: 7 MiB for the
+# 4 MiB default, inside the 8 MiB desktop response frame with room for the
+# rest of the response. Ordinary logs stay far below it.
+_EDITOR_LOG_ENCODED_RATIO = 7
 MAX_EDITOR_COMMAND_BYTES = 16 * 1024
 MAX_EDITOR_ARGUMENTS = 64
 MAX_EDITOR_ARGUMENT_BYTES = 4096
@@ -338,30 +349,38 @@ class WorkspaceUtilityService:
 def _editor_log_content(tail: JobLogTail, budget: int) -> str | None:
     """Return the export text of ``tail`` within ``budget`` UTF-8 bytes.
 
-    A cut log keeps its end, after the note the desktop log view shows for a
-    cut log, so the editor and the view describe the same cut the same way.
-    ``None`` means the log cannot fit the budget, not even as a note.
+    The text must also fit the desktop response frame, where it travels as a
+    JSON string and control characters such as ANSI escapes take up to six
+    bytes each, so its encoded size is capped too. A log over either keeps its
+    end, after the note the desktop log view shows for a cut log, so the
+    editor and the view describe the same cut the same way. ``None`` means
+    the log cannot fit, not even as a note.
     """
+    encoded_budget = budget * _EDITOR_LOG_ENCODED_RATIO // 4
     text = tail.text
-    if not tail.truncated:
-        return text if len(text.encode("utf-8")) <= budget else None
-    content = job_log_truncation_note(len(text.encode("utf-8")), tail.total_bytes)
-    excess = len(content.encode("utf-8")) + len(text.encode("utf-8")) - budget
-    if excess > 0:
-        # Each character takes at least one UTF-8 byte, so dropping the excess
-        # plus the note's room in characters makes enough space.
-        text = _from_line_start(text[excess + _EDITOR_LOG_NOTE_ROOM :])
-        content = job_log_truncation_note(len(text.encode("utf-8")), tail.total_bytes)
-    content += text
-    return content if len(content.encode("utf-8")) <= budget else None
+    truncated = tail.truncated
+    for _ in range(_EDITOR_LOG_TRIMS):
+        content = (
+            job_log_truncation_note(len(text.encode("utf-8")), tail.total_bytes) + text
+            if truncated
+            else text
+        )
+        excess = max(
+            len(content.encode("utf-8")) - budget,
+            _encoded_size(content) - encoded_budget,
+        )
+        if excess <= 0:
+            return content
+        # Each character adds at least one byte to the measure, so dropping
+        # the excess plus the note's room in characters makes enough space.
+        text = log_from_line_start(text[excess + _EDITOR_LOG_NOTE_ROOM :])
+        truncated = True
+    return None
 
 
-def _from_line_start(text: str) -> str:
-    """Drop a partial first line, unless it is the only line there is."""
-    newline = text.find("\n")
-    if newline == -1 or newline == len(text) - 1:
-        return text
-    return text[newline + 1 :]
+def _encoded_size(text: str) -> int:
+    """Return the bytes ``text`` takes as a JSON string, without the quotes."""
+    return len(json.dumps(text, ensure_ascii=False).encode("utf-8")) - 2
 
 
 def _with_wait_flag(executable: str, argv: tuple[str, ...]) -> tuple[str, ...]:

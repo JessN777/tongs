@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -241,6 +242,26 @@ async def test_a_log_over_the_editor_budget_exports_its_end_after_a_note() -> No
     assert rest.endswith("line 0999\n")
     assert len(rest.splitlines()) > 50
     assert calls.releases == []
+
+
+@pytest.mark.asyncio
+async def test_an_escape_dense_log_fits_its_budget_once_encoded() -> None:
+    calls = Calls()
+    # Each line is 15 UTF-8 bytes but 27 bytes as a JSON string, so the log
+    # fits 1024 raw bytes while its encoded size passes the 1792-byte cap.
+    calls.log = b"".join(
+        f"\x1b[31m{index:04d}\x1b[0m\r\n".encode() for index in range(68)
+    )
+    assert len(calls.log) <= 1024
+
+    result = await _service(calls, max_bytes=1024).prepare_editor_log(JOB)
+
+    assert result.status is EditorPlanStatus.READY
+    content = result.content
+    assert content is not None
+    assert len(json.dumps(content, ensure_ascii=False).encode()) - 2 <= 1792
+    assert content.startswith("[tongs] This job log is ")
+    assert content.endswith("\x1b[31m0067\x1b[0m\r\n")
 
 
 @pytest.mark.asyncio
