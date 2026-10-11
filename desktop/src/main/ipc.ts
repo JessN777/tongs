@@ -5,11 +5,12 @@ import {
   type IpcMainInvokeEvent,
 } from "electron";
 import {
-  encodeReadFailure,
   IPC_CHANNELS,
+  readFailureOf,
   type DesktopEvent,
   type JsonObject,
   type JsonValue,
+  type ReadIPCResult,
 } from "../shared/bridge.js";
 import type { AppearanceController } from "./appearance.js";
 import type { AssetCatalog } from "./assets.js";
@@ -213,20 +214,11 @@ export class DesktopIpcController {
     validateParams: ParamsValidator = assertParams,
     validateResult: ResultValidator = assertResult,
   ): Promise<JsonValue> {
-    // Reads reject rather than resolve, so the structured failure has to travel
-    // inside the message the renderer receives.  Without it every read failure
-    // arrives as an opaque Error and the cause is lost.
-    try {
-      return await this.performRead(
-        event,
-        method,
-        value,
-        validateParams,
-        validateResult,
-      );
-    } catch (error) {
-      throw encodeReadFailure(error);
-    }
+    // An unauthorized sender still rejects, and Electron logs it.
+    assertAuthorizedSender(event, this.window.webContents);
+    return settleRead(() =>
+      this.performRead(event, method, value, validateParams, validateResult),
+    );
   }
 
   private async performRead(
@@ -236,7 +228,6 @@ export class DesktopIpcController {
     validateParams: ParamsValidator,
     validateResult: ResultValidator,
   ): Promise<JsonValue> {
-    assertAuthorizedSender(event, this.window.webContents);
     const invocation = parseInvocation(value);
     validateParams(method, invocation.params);
     if (this.bindings.has(invocation.requestToken)) {
@@ -286,11 +277,8 @@ export class DesktopIpcController {
     operation: ReviewOperation,
     value: unknown,
   ): Promise<JsonValue> {
-    try {
-      return await this.performReviewRead(event, operation, value);
-    } catch (error) {
-      throw encodeReadFailure(error);
-    }
+    assertAuthorizedSender(event, this.window.webContents);
+    return settleRead(() => this.performReviewRead(event, operation, value));
   }
 
   private async performReviewRead(
@@ -298,7 +286,6 @@ export class DesktopIpcController {
     operation: ReviewOperation,
     value: unknown,
   ): Promise<JsonValue> {
-    assertAuthorizedSender(event, this.window.webContents);
     const invocation = parseInvocation(value);
     assertReviewParams(operation.method, invocation.params);
     if (this.bindings.has(invocation.requestToken)) {
@@ -348,6 +335,13 @@ export class DesktopIpcController {
     value: unknown,
   ): Promise<JsonValue> {
     assertAuthorizedSender(event, this.window.webContents);
+    return settleRead(() => this.performListAssets(event, value));
+  }
+
+  private async performListAssets(
+    event: IpcMainInvokeEvent,
+    value: unknown,
+  ): Promise<JsonValue> {
     const invocation = parseInvocation(value);
     assertParams("assets.list", invocation.params);
     if (this.bindings.has(invocation.requestToken)) {
@@ -500,6 +494,22 @@ function safeReviewMutationError(error: unknown): {
       "retryable" in error &&
       error.retryable === true,
   };
+}
+
+/**
+ * Resolve a read with its result or its bounded failure instead of rejecting.
+ * Electron logs every rejected handler, so a cancelled read would otherwise
+ * print a stack trace although the renderer expects it. The preload turns the
+ * failure back into the encoded error the renderer decodes.
+ */
+async function settleRead(read: () => Promise<JsonValue>): Promise<JsonValue> {
+  let response: ReadIPCResult;
+  try {
+    response = { result: await read(), error: null };
+  } catch (error) {
+    response = { result: null, error: readFailureOf(error) };
+  }
+  return response as unknown as JsonValue;
 }
 
 type ParamsValidator = (

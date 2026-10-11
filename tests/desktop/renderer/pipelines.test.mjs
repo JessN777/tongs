@@ -203,6 +203,15 @@ test("a pipeline and job the forge left partly blank still render", async () => 
   });
   const view = renderFeature(bridge);
   await view.findByText("build-201");
+  // The job header, and its forge button, render only after the first job is
+  // selected, which can land in a later commit than the job list itself.
+  // Wait on a count so a miss never formats the jsdom tree.
+  await waitFor(() => {
+    assert.equal(
+      view.queryAllByRole("button", { name: "Open job on forge" }).length,
+      1,
+    );
+  });
 
   assert.equal(view.queryAllByText("No stage").length, 1);
   const meta = view.container.querySelector(".ci-summary .ci-meta").textContent;

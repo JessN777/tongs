@@ -278,29 +278,48 @@ export const IPC_CHANNELS = Object.freeze({
 } as const);
 
 /**
+ * What a main-process read handler resolves with. A handler never rejects:
+ * Electron logs every rejected handler as an error, and an expected failure,
+ * such as a read the renderer cancelled, is not one. Exactly one of `result`
+ * and `error` is set. The preload checks the envelope and turns `error` back
+ * into the encoded failure below, so the renderer API does not change.
+ */
+export type ReadIPCResult<T = JsonValue> =
+  | { readonly result: T; readonly error: null }
+  | { readonly result: null; readonly error: ServiceErrorDto };
+
+/**
  * Electron rebuilds a rejected `invoke` as a fresh Error and keeps only its
- * message, so a `code` or `retryable` property never survives the read boundary.
- * The main process therefore encodes the failure into the message and the
- * renderer decodes it, which is what lets a read report its real cause instead
- * of one generic sentence for every failure.
+ * message, and a preload rejection reaches the renderer the same way, so a
+ * `code` or `retryable` property never survives the read boundary. The preload
+ * therefore encodes the failure into the message and the renderer decodes it,
+ * which is what lets a read report its real cause instead of one generic
+ * sentence for every failure. The sandboxed preload cannot import this module
+ * and repeats the marker, code pattern and detail bound; the electron IPC
+ * tests check that its encoding decodes here.
  */
 const READ_FAILURE_MARKER = "tongs-read-failure:";
 const READ_FAILURE_PATTERN = /tongs-read-failure:([%A-Za-z0-9!'()*\-._~]+)/;
 const READ_FAILURE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_READ_FAILURE_DETAIL = 240;
 
-export function encodeReadFailure(error: unknown): Error {
+/** The bounded failure a read reports, with an unknown code as invalid_response. */
+export function readFailureOf(error: unknown): ServiceErrorDto {
   const source: Record<string, unknown> =
     error !== null && typeof error === "object"
       ? (error as Record<string, unknown>)
       : {};
   const candidate = typeof source.code === "string" ? source.code : "";
   const detail = typeof source.message === "string" ? source.message : "";
-  const failure: ServiceErrorDto = {
+  return {
     code: READ_FAILURE_CODE.test(candidate) ? candidate : "invalid_response",
     message: readableDetail(detail),
     retryable: source.retryable === true,
   };
+}
+
+export function encodeReadFailure(error: unknown): Error {
+  const failure = readFailureOf(error);
   const encoded = encodeURIComponent(JSON.stringify(failure));
   return new Error(`${READ_FAILURE_MARKER}${encoded} ${failure.message}`);
 }
