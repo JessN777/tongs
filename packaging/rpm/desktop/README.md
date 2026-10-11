@@ -79,7 +79,11 @@ SRPM give byte-identical RPM files rather than only identical payloads.
 `SOURCE_DATE_EPOCH` comes from the newest `%changelog` entry of the source RPM
 (`source_date_epoch_from_changelog`, which Fedora enables and the scripts
 define explicitly, together with `clamp_mtime_to_source_date_epoch`); every
-Tongs spec template and companion spec carries a changelog entry. The scripts
+Tongs spec template and companion spec carries a changelog entry. The Tongs
+templates date theirs with `@CHANGELOG_DATE@`, which `prepare_sources.py` sets
+to the source commit's UTC committer date, so each release builds with its own
+date and a rebuild of one commit stays identical; the companion specs keep the
+fixed date of their packaged upstream version. The scripts
 clear any inherited `SOURCE_DATE_EPOCH`, so the changelog is its only source,
 and refuse a source RPM without a changelog entry instead of letting rpm fall
 back to the clock. The build time is that epoch, the build host is a fixed

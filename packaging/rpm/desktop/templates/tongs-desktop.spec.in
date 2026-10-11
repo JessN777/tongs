@@ -95,5 +95,5 @@ grep -F -- '--tongs-core-version @CORE_PEP440_VERSION@' %{SOURCE11}
 %doc %{_docdir}/tongs-desktop
 
 %changelog
-* Tue Sep 08 2026 Tongs release automation <noreply@tongs.tools> - @DESKTOP_VERSION@-@RPM_RELEASE@
+* @CHANGELOG_DATE@ Tongs release automation <noreply@tongs.tools> - @DESKTOP_VERSION@-@RPM_RELEASE@
 - Package the accepted issue 51 desktop payload for Fedora 44.

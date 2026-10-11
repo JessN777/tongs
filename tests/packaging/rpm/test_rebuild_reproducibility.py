@@ -7,6 +7,7 @@ each published or previous build receives without a Fedora toolchain.
 
 from __future__ import annotations
 
+import importlib.util
 import itertools
 import json
 import os
@@ -20,8 +21,8 @@ ROOT = Path(__file__).parents[3]
 DESKTOP = ROOT / "packaging" / "rpm" / "desktop"
 COMPANIONS = ROOT / "packaging" / "rpm" / "python-dependencies"
 
-#: The newest changelog date of every Tongs and companion spec, as rpm stores
-#: it (noon UTC on Tue Sep 08 2026).
+#: A changelog date as rpm stores it (noon UTC on Tue Sep 08 2026), for the
+#: stand-in rpm. Tongs specs take theirs from the source commit.
 CHANGELOG_TIME = "1788868800"
 
 #: Defines every rebuild passes so two rebuilds of one SRPM are byte-identical.
@@ -373,3 +374,58 @@ def test_every_spec_dates_its_build_from_a_changelog_entry(spec: Path) -> None:
     _, separator, changelog = text.partition("\n%changelog\n")
     assert separator, spec.name
     assert changelog.startswith("* "), spec.name
+
+
+def _prepare_sources_module() -> object:
+    spec = importlib.util.spec_from_file_location(
+        "tongs_prepare_sources", DESKTOP / "prepare_sources.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(DESKTOP))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(DESKTOP))
+    return module
+
+
+@pytest.mark.parametrize(
+    ("committed", "expected"),
+    [
+        ("2026-09-08T23:59:59+00:00", "Tue Sep 08 2026"),
+        # A late-evening commit west of UTC is dated by its UTC day.
+        ("2026-10-11T21:30:00-04:00", "Mon Oct 12 2026"),
+    ],
+)
+def test_tongs_changelog_is_dated_from_the_source_commit(
+    tmp_path: Path, committed: str, expected: str
+) -> None:
+    git = ["git", "-C", str(tmp_path), "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    env = {
+        **os.environ,
+        "GIT_COMMITTER_DATE": committed,
+        "GIT_AUTHOR_DATE": committed,
+        "GIT_AUTHOR_NAME": "tongs",
+        "GIT_AUTHOR_EMAIL": "tongs@example.com",
+        "GIT_COMMITTER_NAME": "tongs",
+        "GIT_COMMITTER_EMAIL": "tongs@example.com",
+        "LC_ALL": "de_DE.UTF-8",
+    }
+    subprocess.run(
+        [*git, "commit", "-q", "--allow-empty", "--no-verify", "-m", "x"],
+        check=True,
+        env=env,
+    )
+
+    module = _prepare_sources_module()
+
+    assert module.changelog_date(tmp_path) == expected
+
+
+@pytest.mark.parametrize("name", ["python-tongs.spec.in", "tongs-desktop.spec.in"])
+def test_tongs_spec_templates_take_the_changelog_date(name: str) -> None:
+    text = (DESKTOP / "templates" / name).read_text()
+    _, _, changelog = text.partition("\n%changelog\n")
+    assert changelog.startswith("* @CHANGELOG_DATE@ "), name

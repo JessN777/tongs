@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from package_contract import (
@@ -17,6 +18,42 @@ from package_contract import (
     source_identity,
     validate_accepted_payload,
 )
+
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+
+def changelog_date(checkout: Path) -> str:
+    """Return the source commit's UTC committer date as an RPM changelog date.
+
+    The rebuilds take SOURCE_DATE_EPOCH, and so the build time and the file
+    mtimes, from the newest changelog entry. Dating that entry from the
+    commit keeps a rebuild reproducible while every release gets its own
+    date. The names are spelled out so the locale cannot change them.
+    """
+    seconds = subprocess.run(
+        ["git", "-C", os.fspath(checkout), "log", "-1", "--format=%ct", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    day = time.gmtime(int(seconds))
+    weekday = _WEEKDAYS[day.tm_wday]
+    month = _MONTHS[day.tm_mon - 1]
+    return f"{weekday} {month} {day.tm_mday:02d} {day.tm_year}"
 
 
 def _render(source: Path, destination: Path, values: dict[str, str]) -> None:
@@ -106,6 +143,7 @@ def prepare(
     shutil.copyfile(icon, sources / "tongs.png")
 
     values = {
+        "CHANGELOG_DATE": changelog_date(checkout),
         "CORE_COMMIT": identity.commit,
         "CORE_PEP440_VERSION": identity.pep440_version,
         "CORE_RPM_VERSION": identity.rpm_version,
