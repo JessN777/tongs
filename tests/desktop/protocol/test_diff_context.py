@@ -1053,6 +1053,44 @@ async def test_a_cancel_for_another_request_keeps_the_generated_diff(
 
 
 @pytest.mark.asyncio
+async def test_a_reused_request_id_does_not_release_an_earlier_generation(
+    tmp_path: Path,
+) -> None:
+    async for wired in _start(tmp_path, _serve_big()):
+        page = await wired.open(layout="split")
+        generate_id = wired.wire.send(
+            "diff.generate",
+            {"review": wired.review, "snapshot": page["snapshot_id"], "file_index": 1},
+        )
+        generated = cast(
+            JsonObject, (await wired.wire.writer.response(generate_id))["result"]
+        )
+        snapshot = cast(str, generated["snapshot_id"])
+        assert generated["next_cursor"] is not None
+
+        # A new request reuses the answered generate's id, then is cancelled.
+        while generate_id in wired.server._pending:
+            await asyncio.sleep(0)
+        frame = {
+            "v": 1,
+            "type": "request",
+            "id": generate_id,
+            "method": "diff.page",
+            "params": {
+                "snapshot": page["snapshot_id"],
+                "resource": wired.review,
+                "cursor": 0,
+            },
+        }
+        wired.wire.reader.feed_data(json.dumps(frame).encode() + b"\n")
+        assert "result" in await wired.wire.writer.response(generate_id)
+        wired.wire.cancel(generate_id)
+
+        assert (await _page(wired, snapshot, generated["next_cursor"]))
+        assert list(wired.server._generated_snapshots) == [snapshot]
+
+
+@pytest.mark.asyncio
 async def test_a_newer_diff_releases_generations_of_diffs_no_longer_on_screen(
     tmp_path: Path,
 ) -> None:

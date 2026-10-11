@@ -350,7 +350,11 @@ class ReviewFileService:
         texts = iter(result.text for result in results)
         old_text = next(texts) if needs_old else None
         new_text = next(texts) if needs_new else None
-        # Another call may have started the same generation during the reads.
+        # Another call may have started, or finished, the same generation
+        # during the reads.
+        cached = self._generated.get(key)
+        if cached is not None:
+            return cached
         running = self._running.get(key)
         if running is None:
             running = self._start_generation(key, file, old_text, new_text)

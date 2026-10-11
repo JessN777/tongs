@@ -696,6 +696,9 @@ class DesktopSidecarServer:
                 ),
             )
             return
+        # A reused request id must not carry a finished request's generated
+        # snapshot, or cancelling the new request would release that one.
+        self._generated_requests.pop(frame.request_id, None)
         context = RequestContext(
             frame.request_id, DesktopCancellation(), mutation=operation.mutation
         )
