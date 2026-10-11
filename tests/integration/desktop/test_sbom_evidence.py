@@ -379,18 +379,30 @@ def test_wrong_trusted_adapter_hash_is_rejected_before_generation(
     assert not case["output"].exists()
 
 
+@pytest.mark.parametrize(
+    ("second", "same_length"),
+    [(_spdx() + b" ", False), (_spdx("1.0.1"), True)],
+    ids=["longer", "equal-length"],
+)
 def test_unequal_generator_outputs_cannot_publish_success(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second: bytes, same_length: bool
 ) -> None:
+    """A length-only comparison would accept the equal-length case."""
+
     case = _case(tmp_path, monkeypatch)
-    outputs = iter((_spdx(), _spdx() + b" "))
+    first = _spdx()
+    assert first != second
+    assert (len(first) == len(second)) is same_length
+    outputs = iter((first, second))
     monkeypatch.setattr(
         ADAPTER.SBOM, "build_desktop_sbom", lambda *_args: next(outputs)
     )
 
     with pytest.raises(ADAPTER.SbomEvidenceError, match="not byte deterministic"):
         _produce(case)
-    assert not case["output"].exists()
+    output = case["output"]
+    assert not output.exists()
+    assert sorted(output.parent.glob(f".{output.name}.*")) == []
 
 
 @pytest.mark.parametrize("mutation", ["missing", "failed", "extra"])

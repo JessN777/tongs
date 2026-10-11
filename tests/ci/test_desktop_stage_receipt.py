@@ -9,6 +9,7 @@ assert a stage the staged bytes do not support.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -542,3 +543,35 @@ def test_refuses_a_dishonest_or_malformed_source_context(
     plan["source_context"] = context
     with pytest.raises(StageReceiptError):
         _publish(checkout, plan, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("dropped", "added"),
+    [("pull_request_base", None), (None, "pull_request_merge")],
+)
+def test_source_context_requires_exactly_its_three_keys(
+    checkout: tuple[Path, str, str],
+    produced: dict[str, Path],
+    tmp_path: Path,
+    dropped: str | None,
+    added: str | None,
+) -> None:
+    """A missing or extra key fails the key-set check, not a later lookup."""
+
+    plan = _plan(produced)
+    context = plan["source_context"]
+    if dropped is not None:
+        del context[dropped]
+    if added is not None:
+        context[added] = "c" * 40
+    missing = [dropped] if dropped else []
+    unexpected = [added] if added else []
+    with pytest.raises(
+        StageReceiptError,
+        match=re.escape(
+            f"source context key set mismatch: missing={missing}, "
+            f"unexpected={unexpected}"
+        ),
+    ):
+        _publish(checkout, plan, tmp_path)
+    assert not (tmp_path / "evidence").exists()

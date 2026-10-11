@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from packaging.version import Version
 
+import tests.ci.desktop_production_expectations as expectations_module
 from tests.ci.desktop_production_expectations import (
     ARCHIVE_ADAPTER_PROGRAM,
     DESKTOP_CORE_MAXIMUM_EXCLUSIVE,
@@ -498,3 +499,75 @@ def test_sbom_consume_arguments_name_the_published_receipt(
     parsed = _parsed(sbom_adapter(), argv)
     assert parsed.command == "consume"
     assert parsed.receipt == tmp_path / "gate" / "sbom-receipt.json"
+
+
+def _cli_arguments(transfer_root: Path, command: str, mode: str) -> list[str]:
+    arguments = [
+        command,
+        "--mode",
+        mode,
+        "--source-root",
+        str(ROOT),
+        "--transfer-root",
+        str(transfer_root),
+        "--commit",
+        COMMIT,
+        "--tree",
+        TREE,
+        "--source-archive-sha256",
+        SOURCE_ARCHIVE,
+        "--source-date-epoch",
+        "1757000000",
+        "--archive-sha256",
+        ARCHIVE_DIGEST,
+        "--repository",
+        "andre-motta/tongs",
+        "--run-id",
+        "34274245440",
+        "--attempt",
+        "1",
+        "--environment",
+        "github-hosted-ubuntu-24.04",
+        "--provenance",
+        "hosted",
+        "--check-id",
+        "desktop-archive-lifecycle",
+    ]
+    if command == "archive-evidence":
+        arguments += [
+            "--release-manifest-sha256",
+            RELEASE_MANIFEST,
+            "--install-manifest-sha256",
+            INSTALL_MANIFEST,
+            "--license-inventory-sha256",
+            LICENSE_INVENTORY,
+        ]
+    else:
+        arguments += ["--archive-receipt", str(transfer_root / "receipt.json")]
+    return arguments
+
+
+@pytest.mark.parametrize("command", ["archive-evidence", "archive-sbom"])
+@pytest.mark.parametrize(
+    ("mode", "required"),
+    [("produce", "--output-root"), ("consume", "--evidence-root")],
+)
+def test_each_mode_refuses_to_run_without_its_root(
+    transfer_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    mode: str,
+    required: str,
+) -> None:
+    """A missing mode root fails before any adapter is loaded or run."""
+
+    def refuse() -> None:
+        raise AssertionError("the adapter must not be loaded")
+
+    monkeypatch.setattr(expectations_module, "archive_adapter", refuse)
+    monkeypatch.setattr(expectations_module, "sbom_adapter", refuse)
+
+    assert expectations_module.main(_cli_arguments(transfer_root, command, mode)) == 1
+    error = capsys.readouterr().err
+    assert f"{required} is required in {mode} mode" in error

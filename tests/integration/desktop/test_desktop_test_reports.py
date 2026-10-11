@@ -341,6 +341,24 @@ def test_node_tap_requires_node_escaped_hashes_in_test_names() -> None:
     assert verifier.verify_node_tap(_flat_tap((r"literal \# skip",))).tests == 1
 
 
+@pytest.mark.parametrize("subtest_name", ["literal # skip", r"literal \\# skip"])
+def test_node_tap_rejects_an_unescaped_hash_in_the_subtest_name_alone(
+    subtest_name: str,
+) -> None:
+    """The ``# Subtest:`` line is checked, not only the assertion record."""
+
+    report = _flat_tap((r"literal \# skip",)).replace(
+        b"# Subtest: literal \\# skip", f"# Subtest: {subtest_name}".encode(), 1
+    )
+    assert f"# Subtest: {subtest_name}\n".encode() in report
+    assert b"ok 1 - literal \\# skip\n" in report
+    with pytest.raises(
+        verifier.ReportValidationError,
+        match="subtest name contains an unescaped hash",
+    ):
+        verifier.verify_node_tap(report)
+
+
 def test_node_tap_rejects_bailout_and_wrong_or_missing_version() -> None:
     bailout = _flat_tap().replace(b"# Subtest: passes", b"Bail out! hidden")
     with pytest.raises(verifier.ReportValidationError, match="bailout"):
