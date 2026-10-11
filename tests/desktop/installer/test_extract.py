@@ -361,3 +361,97 @@ def test_sweep_refuses_an_unsafe_staging_root(tmp_path: Path) -> None:
 
     assert raised.value.code is InstallerErrorCode.EXTRACTION_FAILED
     assert orphan.is_dir()
+
+
+class RacingState(MemoryState):
+    """A store where another writer wins the first swap with ``racer``."""
+
+    def __init__(self, racer: AcceptedReleaseState) -> None:
+        super().__init__()
+        self.racer = racer
+        self.reads = 0
+        self.swaps = 0
+
+    async def read(self) -> AcceptedReleaseState | None:
+        self.reads += 1
+        return await super().read()
+
+    async def compare_and_swap(
+        self,
+        expected: AcceptedReleaseState | None,
+        replacement: AcceptedReleaseState,
+    ) -> bool:
+        self.swaps += 1
+        if self.swaps == 1:
+            self.current = self.racer
+            return False
+        return await super().compare_and_swap(expected, replacement)
+
+
+@pytest.mark.asyncio
+async def test_lost_state_swap_rereads_and_retries_against_the_winner(
+    tmp_path: Path,
+) -> None:
+    staged = extract_verified_archive(
+        documents()[1], verified_metadata(), tmp_path / "stage"
+    )
+    store = RacingState(AcceptedReleaseState("1.0.0", "a" * 64, "b" * 40))
+
+    await _accept_release(store, staged, InstallRequest())
+
+    assert store.current == AcceptedReleaseState(
+        "1.2.3", staged.manifest_sha256, staged.source_commit
+    )
+    assert store.reads == 2
+    assert store.swaps == 2
+    assert store.writes == 1
+
+
+@pytest.mark.asyncio
+async def test_lost_state_swap_to_a_newer_release_blocks_the_rollback(
+    tmp_path: Path,
+) -> None:
+    staged = extract_verified_archive(
+        documents()[1], verified_metadata(), tmp_path / "stage"
+    )
+    newer = AcceptedReleaseState("2.0.0", "a" * 64, "b" * 40)
+    store = RacingState(newer)
+
+    with pytest.raises(InstallerError) as raised:
+        await _accept_release(store, staged, InstallRequest())
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_BLOCKED
+    assert store.current is newer
+    assert store.swaps == 1
+    assert store.writes == 0
+
+
+@pytest.mark.asyncio
+async def test_state_swap_that_always_loses_gives_up_with_a_retryable_conflict(
+    tmp_path: Path,
+) -> None:
+    class AlwaysLosing(MemoryState):
+        def __init__(self) -> None:
+            super().__init__()
+            self.swaps = 0
+
+        async def compare_and_swap(
+            self,
+            expected: AcceptedReleaseState | None,
+            replacement: AcceptedReleaseState,
+        ) -> bool:
+            self.swaps += 1
+            return False
+
+    staged = extract_verified_archive(
+        documents()[1], verified_metadata(), tmp_path / "stage"
+    )
+    store = AlwaysLosing()
+
+    with pytest.raises(InstallerError) as raised:
+        await _accept_release(store, staged, InstallRequest())
+
+    assert raised.value.code is InstallerErrorCode.STATE_CONFLICT
+    assert raised.value.retryable is True
+    assert 1 < store.swaps == extract_module._STATE_ATTEMPTS
+    assert store.current is None
