@@ -11,8 +11,8 @@ reviews.
 
 On startup, tongs walks your scan root (`~/git` by default) up to `scan_depth`
 levels deep, five by default. Each directory with a `.git` folder is a
-repository. tongs skips hidden directories, symlinks and repositories nested
-inside another repository.
+repository, and so is a git worktree. tongs follows symlinked directories and
+skips hidden directories and repositories nested inside another repository.
 
 For each repository, tongs reads the git remotes and works out:
 

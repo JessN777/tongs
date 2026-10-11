@@ -83,6 +83,22 @@ forge_type = "gitlab"
 
 `tongs --scan-root DIR` (or `-d DIR`) overrides `scan_root` for one run.
 
+What the scan finds:
+
+- A directory with a `.git` folder is a repository, and so is a git worktree,
+  whose `.git` is a file that points at the main repository.
+- Symlinked directories are followed, even when they point outside
+  `scan_root`. A link counts as one level of `scan_depth`. Each real directory
+  is scanned once, so a link loop ends and a repository reached by two paths
+  shows up once.
+- Directories whose names start with a dot, such as `.cache` or `.worktrees`,
+  are skipped.
+- A repository inside another repository's working tree, such as a submodule,
+  is skipped.
+- The terminal repo list shows each project once, even when several checkouts
+  of it are found, such as a main checkout and its worktrees or two clones.
+  The row opens a main checkout over a worktree.
+
 ## `[editor]`
 
 Both apps read the `[editor]` keys.
