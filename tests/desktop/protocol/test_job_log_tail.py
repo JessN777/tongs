@@ -153,3 +153,41 @@ def test_a_log_snapshot_always_fits_its_budget() -> None:
         text = "".join(str(entry["text"]) for entry in entries)
         assert text.startswith("[tongs] This job log is ")
         assert revision["byte_count"] == len(text.encode())
+
+
+# The size of one log row; rows are split by UTF-8 bytes, so a row boundary
+# can land inside a multibyte character.
+_LOG_ROW_BYTES = 256 * 1024
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("character", "bytes_before_boundary"),
+    [
+        ("é", 1),
+        ("€", 1),
+        ("€", 2),
+        ("\U0001f600", 1),
+        ("\U0001f600", 2),
+        ("\U0001f600", 3),
+    ],
+)
+async def test_a_multibyte_character_across_a_row_boundary_stays_intact(
+    character: str, bytes_before_boundary: int
+) -> None:
+    assert 0 < bytes_before_boundary < len(character.encode())
+    prefix = "a" * (_LOG_ROW_BYTES - bytes_before_boundary)
+    expected = prefix + character + "tail\n"
+    session = _LogSession(expected.encode())
+
+    text, revision = await _open_whole_log(session)
+    _revision, entries = _log_snapshot(
+        JobLogTail(expected, len(expected.encode()), False),
+        _MAX_LOG_SNAPSHOT_BYTES,
+    )
+
+    assert text == expected
+    assert revision["byte_count"] == len(expected.encode())
+    # The first row stops before the split character, and the next row starts
+    # with all of it, so each row decodes on its own.
+    assert [entry["text"] for entry in entries] == [prefix, character + "tail\n"]

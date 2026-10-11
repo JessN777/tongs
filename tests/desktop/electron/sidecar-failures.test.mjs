@@ -136,6 +136,60 @@ test("stale child events cannot corrupt a replacement generation", async () => {
   current.finish(0, null);
 });
 
+// Node can deliver a child's pipe data after its exit event, so the old
+// child's stdout can still speak once a restart replaced it.
+test("a replaced child's late response never answers the new session's request", async () => {
+  const fake = harness();
+  const transport = transportFor(fake);
+  const crashes = watchCrashes(transport);
+  await transport.start();
+  await transport.restart();
+  const [old, current] = fake.children;
+  assert.equal(old.exitCode, 0);
+  const read = transport.requestRead("assets.list", {});
+  let settled = false;
+  read.result.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+
+  respondTo(old, read.requestId, { result: { from: "replaced child" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  respondTo(current, read.requestId, { result: { from: "current child" } });
+
+  assert.deepEqual(await read.result, { from: "current child" });
+  assert.equal(transport.serviceState, "connected");
+  assert.deepEqual(crashes, []);
+  await transport.stop();
+});
+
+test("a replaced child's late partial frame stays out of the new frame buffer", async () => {
+  const fake = harness();
+  const transport = transportFor(fake);
+  const crashes = watchCrashes(transport);
+  await transport.start();
+  await transport.restart();
+  const [old, current] = fake.children;
+  const read = transport.requestRead("assets.list", {});
+
+  // Unterminated, so a transport that kept it would join it to the front of
+  // the current child's next frame and fail that frame as invalid.
+  old.stdout.write('{"v":1,"type":"response","id":"stale-');
+  await new Promise((resolve) => setImmediate(resolve));
+  respondTo(current, read.requestId, { result: { assets: [] } });
+
+  assert.deepEqual(await read.result, { assets: [] });
+  assert.equal(transport.serviceState, "connected");
+  assert.equal(transport.sessionGeneration, 2);
+  assert.deepEqual(crashes, []);
+  await transport.stop();
+});
+
 test("terminal stop rejects a concurrent start without replacement", async () => {
   const fake = harness({ delayedKill: true, delayedShutdown: true });
   const transport = transportFor(fake, 20);
