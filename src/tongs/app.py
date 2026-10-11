@@ -170,6 +170,7 @@ class TongsApp(App):
         self.repos: list[Repo] = []
         self.plugin_registry = plugin_registry or PluginRegistry()
         self.startup_error: ServiceError | None = None
+        self.shutdown_error: ServiceError | None = None
         self.repository_generation = 0
         self._plugins_ready = False
         # The process-wide scrollbar renderer that ``ascii_mode`` replaced.
@@ -357,7 +358,23 @@ class TongsApp(App):
                 await self.plugin_registry.on_app_shutdown(self)
         finally:
             self._restore_scrollbars()
+            await self._close_session()
+
+    async def _close_session(self) -> None:
+        """Close the session; on failure, close its stores anyway for exit.
+
+        A failed close keeps the stores open for a retry, but the app is
+        exiting, so the final close runs. The error is kept in
+        ``shutdown_error`` for the entry point to report: raised from here,
+        it would surface as an unrelated Textual shutdown error.
+        """
+        try:
             await self.session.close()
+        except ServiceError:
+            try:
+                await self.session.close(final=True)
+            except ServiceError as error:
+                self.shutdown_error = error
 
     def action_help(self) -> None:
         if self.screen.query("HelpPanel"):

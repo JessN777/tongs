@@ -44,6 +44,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     app = TongsApp(config=config)
     app.run()
+    if app.shutdown_error is not None:
+        print(f"tongs: {app.shutdown_error.message}", file=sys.stderr)
+        return 1
     return 0
 
 

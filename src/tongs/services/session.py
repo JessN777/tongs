@@ -406,12 +406,31 @@ class ApplicationSession:
                     raise
                 raise translate_error(error, operation="start_session") from None
 
-    async def close(self) -> None:
-        """Close registry and cache once, within the configured time bound."""
-        task = await self._ensure_close_task()
-        await self._await_close_task(task)
+    async def close(self, *, final: bool = False) -> None:
+        """Close registry and cache once, within the configured time bound.
 
-    async def _ensure_close_task(self) -> asyncio.Task[None]:
+        When an in-flight write does not stop within the bound, the draft
+        store, registry and cache stay open and a later ``close()`` retries,
+        so the write can still land. ``final=True`` is for process exit, when
+        no retry will come: the stores and the registry are closed anyway,
+        each within the bound, and the failure is still raised. A draft
+        store operation already running finishes first, an unfinished
+        transaction rolls back, and the next start recovers interrupted
+        submissions. Without this, open SQLite worker threads keep the
+        process alive after the app has gone.
+        """
+        task = await self._ensure_close_task(final=final)
+        try:
+            await self._await_close_task(task)
+        except ServiceError:
+            if not final or self._state is not _SessionState.CLOSING:
+                raise
+            # A close without ``final`` was already running and kept the
+            # resources open for a retry that will not come.
+            task = await self._ensure_close_task(final=True)
+            await self._await_close_task(task)
+
+    async def _ensure_close_task(self, *, final: bool = False) -> asyncio.Task[None]:
         async with self._close_lock:
             if self._close_task is None or (
                 self._close_task.done() and self._state is _SessionState.CLOSING
@@ -419,11 +438,13 @@ class ApplicationSession:
                 self._close_requested = True
                 start_task = self._start_task
                 self._close_task = asyncio.create_task(
-                    self._coordinate_close(start_task)
+                    self._coordinate_close(start_task, final=final)
                 )
             return self._close_task
 
-    async def _coordinate_close(self, start_task: asyncio.Task[object] | None) -> None:
+    async def _coordinate_close(
+        self, start_task: asyncio.Task[object] | None, *, final: bool = False
+    ) -> None:
         startup_timed_out = False
         if start_task is not None and not start_task.done():
             start_task.cancel()
@@ -433,7 +454,7 @@ class ApplicationSession:
                 )
             except TimeoutError:
                 startup_timed_out = True
-        await self._close_resources(startup_timed_out=startup_timed_out)
+        await self._close_resources(startup_timed_out=startup_timed_out, final=final)
 
     async def _await_close_task(self, task: asyncio.Task[None]) -> None:
         try:
@@ -450,7 +471,9 @@ class ApplicationSession:
         except (asyncio.CancelledError, ServiceError):
             pass
 
-    async def _close_resources(self, *, startup_timed_out: bool = False) -> None:
+    async def _close_resources(
+        self, *, startup_timed_out: bool = False, final: bool = False
+    ) -> None:
         if self._state == _SessionState.CLOSED:
             return
         self._state = _SessionState.CLOSING
@@ -470,7 +493,7 @@ class ApplicationSession:
             except Exception as error:  # noqa: BLE001 - Preserve dependencies.
                 failures.append(error)
                 mutation_cleanup_failed = True
-            if mutation_cleanup_failed:
+            if mutation_cleanup_failed and not final:
                 self._close_event_streams()
                 self._issued_repositories.clear()
                 self._repositories.clear()
@@ -509,7 +532,7 @@ class ApplicationSession:
             except Exception as error:  # noqa: BLE001 - Continue owned cleanup.
                 failures.append(error)
                 mutation_cleanup_failed = True
-            if mutation_cleanup_failed:
+            if mutation_cleanup_failed and not final:
                 self._close_event_streams()
                 self._issued_repositories.clear()
                 self._repositories.clear()
