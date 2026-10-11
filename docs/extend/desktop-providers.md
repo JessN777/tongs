@@ -285,7 +285,7 @@ abort handling, and idempotent cleanup.
 | `cancellation` | Provider-lifetime cancellation. It is signalled when startup times out or shutdown begins. |
 | `read_kinds`, `method_ids`, `event_ids`, `focus_target_ids` | Frozen allowlists derived from the validated manifest by the host. |
 | `current_location()` | Returns a host-validated, frozen JSON location snapshot or `None`. |
-| `read(kind, params, cancellation)` | Runs a declared read with separately cancellable, frozen parameters. |
+| `read(kind, params, cancellation)` | Runs a declared read with separately cancellable, frozen parameters. Signalling `cancellation` stops the read. A read that fails or is abandoned never signals it, so the lifetime token can be passed to every read. |
 | `notify(message, severity)` | Publishes a notification with `information`, `warning`, or `error` severity. |
 | `publish_event(event_id, payload)` | Publishes a declared plugin event with a frozen JSON payload. |
 | `focus(target_id, metadata)` | Requests a declared focus target with frozen JSON metadata. |

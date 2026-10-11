@@ -1691,9 +1691,14 @@ class DesktopSidecarServer:
             DesktopReadKind.DISCUSSIONS: self._discussions_all,
         }
         handler = whole_list_handlers.get(kind, self._operations[method].handler)
+        # The read gets its own token, linked one way to the caller's: the
+        # caller cancelling stops the read, but a failed or abandoned read
+        # never cancels the caller's token. A plugin often passes its lifetime
+        # token, and one failed read must not stop every later one (#312).
+        read_cancellation = DesktopCancellation()
         context = RequestContext(
-            f"plugin-{id(cancellation):x}",
-            cancellation,
+            f"plugin-{id(read_cancellation):x}",
+            read_cancellation,
             mutation=False,
             dispatched=True,
         )
@@ -1713,7 +1718,7 @@ class DesktopSidecarServer:
             return result
         finally:
             if not completed:
-                cancellation.cancel()
+                read_cancellation.cancel()
             task.cancel()
             cancellation_task.cancel()
             await _bounded_tasks_cleanup(
