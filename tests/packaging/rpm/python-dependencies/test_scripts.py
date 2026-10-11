@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
+import json
+import os
 import subprocess
+import sys
 import tarfile
 import urllib.error
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import Self
 
 import pytest
 
@@ -26,6 +31,31 @@ def _load_script(name: str) -> ModuleType:
 audit_providers = _load_script("audit_providers")
 prepare_sources = _load_script("prepare_sources")
 resolve_srpms = _load_script("resolve_srpms")
+verify_install = _load_script("verify_install")
+
+SOURCE_URL = "https://files.pythonhosted.org/source.tar.gz"
+
+
+class _Response(io.BytesIO):
+    """A served download whose final URL stays on the expected HTTPS host."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+    def geturl(self) -> str:
+        return SOURCE_URL
+
+
+def _source(contents: bytes) -> dict[str, object]:
+    return {
+        "url": SOURCE_URL,
+        "filename": "source.tar.gz",
+        "bytes": len(contents),
+        "sha256": hashlib.sha256(contents).hexdigest(),
+    }
 
 
 def test_repoquery_requests_one_record_per_line(
@@ -366,3 +396,290 @@ def test_resolve_srpm_rejects_filename_traversal(tmp_path: Path) -> None:
             "python-sigstore|4.5.0|1.fc44|noarch|../source.src.rpm",
             tmp_path,
         )
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # A second source still names a path under the absolute vendor tree.
+        (
+            '[source.vendored-sources]\ndirectory = "{vendor}"\n'
+            '[source.nested]\ndirectory = "{vendor}/nested"\n'
+        ),
+        # The vendor directory is spelled differently, so nothing is rewritten.
+        "[source.vendored-sources]\ndirectory = '{vendor}'\n",
+    ],
+    ids=["leftover-absolute-path", "unrecognized-directory"],
+)
+def test_cargo_vendor_config_rejects_a_leftover_absolute_path(config: str) -> None:
+    vendor = Path("/tmp/preparation/source/vendor")
+
+    with pytest.raises(RuntimeError, match="expected directory"):
+        prepare_sources._relativize_vendor_config(config.format(vendor=vendor), vendor)
+
+
+def test_download_raises_a_server_error_on_the_final_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = 0
+    sleeps: list[int] = []
+
+    def urlopen(*_args: object, **_kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        raise urllib.error.HTTPError(
+            SOURCE_URL, 500 + attempts, "Server Error", {}, None
+        )
+
+    monkeypatch.setattr(prepare_sources.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(prepare_sources.time, "sleep", sleeps.append)
+
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        prepare_sources._download(_source(b"source"), tmp_path / "source.tar.gz")
+
+    # The third server error is the one raised; it is never swallowed.
+    assert exc_info.value.code == 503
+    assert attempts == 3
+    assert sleeps == [1, 2]
+
+
+def test_download_stops_when_the_body_exceeds_the_declared_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    declared = b"source"
+    attempts = 0
+
+    def urlopen(*_args: object, **_kwargs: object) -> _Response:
+        nonlocal attempts
+        attempts += 1
+        return _Response(declared + b"!")
+
+    monkeypatch.setattr(prepare_sources.urllib.request, "urlopen", urlopen)
+    output = tmp_path / "source.tar.gz"
+
+    with pytest.raises(RuntimeError, match="exceeds declared size"):
+        prepare_sources._download(_source(declared), output)
+
+    # An oversized body is a hard failure, not a transient one to retry.
+    assert attempts == 1
+    assert output.read_bytes() == b""
+
+
+def _verify_cargo_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    packages: list[tuple[str, bool]],
+) -> tuple[dict[str, object], Path]:
+    """Stage an installed Cargo inventory for ``verify_install.verify``.
+
+    Each package is ``(name, resolved_for_fedora_x86_64)``. Resolved packages
+    get a bundled license file whose hash matches the inventory, so only the
+    vendored OpenSSL gate decides the outcome before the Sigstore fixture
+    check, whose retained fixtures are deliberately absent.
+    """
+
+    manifest = json.loads((PACKAGING / "manifest.json").read_text())
+    versions = {
+        item["distribution"]: item["version"] for item in manifest["companions"]
+    }
+    monkeypatch.setattr(
+        verify_install,
+        "importlib",
+        SimpleNamespace(
+            import_module=lambda name: SimpleNamespace(__file__=f"/{name}.so"),
+            metadata=SimpleNamespace(version=versions.__getitem__),
+        ),
+    )
+    license_root = tmp_path / "licenses"
+    monkeypatch.setattr(verify_install, "CARGO_LICENSE_ROOT", license_root)
+    records = []
+    for name, resolved in packages:
+        bundled = []
+        if resolved:
+            license_path = license_root / "cargo" / f"{name}-0.1.0" / "LICENSE"
+            license_path.parent.mkdir(parents=True)
+            license_path.write_bytes(f"license for {name}\n".encode())
+            bundled.append(
+                {
+                    "path": f"{name}-0.1.0/LICENSE",
+                    "sha256": hashlib.sha256(license_path.read_bytes()).hexdigest(),
+                }
+            )
+        records.append(
+            {
+                "name": name,
+                "version": "0.1.0",
+                "resolved_for_fedora_x86_64": resolved,
+                "bundled_license_files": bundled,
+            }
+        )
+    rust = next(
+        item
+        for item in manifest["companions"]
+        if item["distribution"] == "rfc3161-client"
+    )
+    license_root.mkdir(exist_ok=True)
+    (license_root / "cargo-inventory.json").write_text(
+        json.dumps(
+            {
+                "upstream_cargo_lock_sha256": rust["cargo"]["lock_sha256"],
+                "packages": records,
+            }
+        )
+    )
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    for name in (
+        "sigstore-python-4.5.0.intoto.sigstore.json",
+        "sigstore-production-client-trust-config.json",
+    ):
+        (fixture_dir / name).write_text("not the retained fixture\n")
+    return manifest, fixture_dir
+
+
+def test_verify_install_rejects_vendored_openssl_in_the_resolved_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, fixture_dir = _verify_cargo_inventory(
+        tmp_path, monkeypatch, [("openssl", True), ("openssl-src", True)]
+    )
+
+    with pytest.raises(RuntimeError, match="vendored OpenSSL"):
+        verify_install.verify(manifest, fixture_dir)
+
+
+def test_verify_install_accepts_system_openssl_and_retained_vendor_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The system ``openssl`` binding is resolved and ``openssl-src`` is only
+    # retained vendor source, so the OpenSSL gate passes and verification
+    # reaches the next stage: the retained Sigstore fixture hashes.
+    manifest, fixture_dir = _verify_cargo_inventory(
+        tmp_path, monkeypatch, [("openssl", True), ("openssl-src", False)]
+    )
+
+    with pytest.raises(RuntimeError, match="retained Sigstore fixture hash mismatch"):
+        verify_install.verify(manifest, fixture_dir)
+
+
+_FAKE_PODMAN = r"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$PODMAN_LOG"
+option() {
+    local name=$1
+    shift
+    while (($#)); do
+        if [[ $1 == "$name" ]]; then
+            printf '%s\n' "$2"
+            return
+        fi
+        shift
+    done
+    return 1
+}
+case $1 in
+    run)
+        if [[ " $* " == *" --entrypoint rpm "* ]]; then
+            srpm=$(basename -- "${@: -1}")
+            # The header name, not the file name, identifies each SRPM.
+            case $srpm in
+                python-foo-bar-*) printf 'python-foo-bar|2.0|1.fc44|noarch' ;;
+                python-foo-*) printf 'python-foo|1.0|1.fc44|noarch' ;;
+                *) exit 3 ;;
+            esac
+        elif [[ " $* " == *"/rebuild_one_srpm.sh "* ]]; then
+            output=""
+            for argument in "$@"; do
+                if [[ $argument == *:/output:* ]]; then
+                    output=${argument%%:/output:*}
+                fi
+            done
+            distribution=$(option --distribution "$@")
+            : >"$output/python3-$distribution.rpm"
+        fi
+        ;;
+    build)
+        tag=$(option --tag "$@")
+        context=${@: -1}
+        printf '%s=%s\n' "$tag" "$(cat -- "$context/source.src.rpm")" >>"$BUILD_LOG"
+        ;;
+    image)
+        printf '{}\n'
+        ;;
+    *)
+        exit 4
+        ;;
+esac
+"""
+
+
+def test_rebuild_srpms_pairs_each_distribution_with_its_exact_srpm(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    podman = fake_bin / "podman"
+    podman.write_text(_FAKE_PODMAN)
+    python3 = fake_bin / "python3"
+    python3.write_text('#!/bin/sh\nexec "$TEST_PYTHON" "$@"\n')
+    for executable in (podman, python3):
+        executable.chmod(0o755)
+    srpm_dir = tmp_path / "srpms"
+    srpm_dir.mkdir()
+    # Both file names start with ``python-foo-``, so a name-prefix glob for
+    # ``foo`` would match the ``foo-bar`` SRPM as well.
+    for filename, contents in (
+        ("python-foo-1.0-1.fc44.src.rpm", "python-foo"),
+        ("python-foo-bar-2.0-1.fc44.src.rpm", "python-foo-bar"),
+    ):
+        (srpm_dir / filename).write_text(contents)
+    (srpm_dir / "build-order.txt").write_text("foo-bar\nfoo\n")
+    output_dir = tmp_path / "rpms"
+    output_dir.mkdir()
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    build_log = tmp_path / "build.log"
+    source_sha = "a" * 40
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(PACKAGING / "rebuild_srpms.sh"),
+            "--base-image",
+            "registry.example/fedora@sha256:" + "0" * 64,
+            "--checkout",
+            str(ROOT),
+            "--source-sha",
+            source_sha,
+            "--srpm-dir",
+            str(srpm_dir),
+            "--output-dir",
+            str(output_dir),
+        ],
+        env={
+            **os.environ,
+            "BUILD_LOG": str(build_log),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "PODMAN_LOG": str(tmp_path / "podman.log"),
+            "RUNNER_TEMP": str(runner_temp),
+            "TEST_PYTHON": sys.executable,
+        },
+        text=True,
+        check=False,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (output_dir / "resolved-srpms.txt").read_text().splitlines() == [
+        f"foo-bar|{srpm_dir / 'python-foo-bar-2.0-1.fc44.src.rpm'}",
+        f"foo|{srpm_dir / 'python-foo-1.0-1.fc44.src.rpm'}",
+    ]
+    assert build_log.read_text().splitlines() == [
+        f"localhost/tongs-python-rpm-foo-bar:{source_sha}=python-foo-bar",
+        f"localhost/tongs-python-rpm-foo:{source_sha}=python-foo",
+    ]
+    assert sorted(path.name for path in output_dir.glob("*.rpm")) == [
+        "python3-foo-bar.rpm",
+        "python3-foo.rpm",
+    ]
+    assert list(runner_temp.iterdir()) == []
