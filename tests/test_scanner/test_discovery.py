@@ -273,6 +273,17 @@ class TestDiscoverSymlinks:
         repos = discover_repos(root, max_depth=50)
         assert [repo.path for repo in repos] == [(root / "repo").resolve()]
 
+    def test_link_up_to_a_repository_holding_the_root_keeps_its_repos(self, tmp_path):
+        # A home folder kept in git, scanned from a folder inside it.
+        home = tmp_path / "home"
+        _init_repo(home, {"origin": "https://github.com/user/dotfiles.git"})
+        root = home / "git"
+        _init_repo(root / "proj", {"origin": "https://github.com/org/proj.git"})
+        (root / "homelink").symlink_to(home)
+        (root / "a").symlink_to("..")
+        repos = discover_repos(root, max_depth=50)
+        assert [repo.path for repo in repos] == [(root / "proj").resolve()]
+
     def test_two_links_pointing_at_each_other_end(self, tmp_path):
         _init_repo(tmp_path / "repo", {"origin": "https://github.com/org/repo.git"})
         (tmp_path / "a").symlink_to(tmp_path / "b")

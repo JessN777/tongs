@@ -28,12 +28,19 @@ def discover_repos(
     two paths is reported once, at its resolved path. Dot-folders are not
     scanned. Parses remotes from each repo to determine forge type.
     Skips nested repos (a repository inside another one's working tree).
+    A repository that contains root, reached through a link back up, is not
+    reported and does not hide the repositories under root.
     """
     root = root.expanduser().resolve()
     if not root.is_dir():
         return []
 
-    checkouts = _find_checkouts(root, max_depth)
+    ancestors = set(root.parents)
+    checkouts = {
+        path: worktree
+        for path, worktree in _find_checkouts(root, max_depth).items()
+        if path not in ancestors
+    }
     found = set(checkouts)
     repos: list[Repo] = []
 
