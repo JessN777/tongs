@@ -62,7 +62,10 @@ shorten it.
 Drafts live in `drafts.db` in the tongs data directory
 (`~/.local/share/tongs/` on Linux). The file is created with mode `0600`.
 Clearing the cache does not touch it. The desktop app (beta) reads and writes
-the same drafts.
+the same drafts. While a review is being submitted, a lock file in
+`drafts.db.locks/` next to it stops a second app from submitting it too. tongs
+deletes the lock file when the submission ends or the app closes, and deletes
+any left behind by an app that crashed the next time it starts.
 :::
 
 ## Submit the review

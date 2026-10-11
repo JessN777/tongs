@@ -42,6 +42,21 @@ export const STDERR_LOG_PREFIX = "[tongs service] ";
 export const STDERR_LINE_TRUNCATED = " [line truncated]";
 export const STDERR_OUTPUT_DROPPED = "further output dropped";
 const EDITOR_EXPORT_ROOT_ENV = "TONGS_DESKTOP_EDITOR_EXPORT_ROOT";
+/**
+ * How long a stop waits for the service to exit on its own before SIGTERM,
+ * then SIGKILL a second later (#442). The service answers `shutdown` at once,
+ * gives pending requests up to 5 s to stop and plugins up to 2 s to clean up,
+ * then closes its session for good. When a review submission does not stop,
+ * that close spends up to 2 s on the submission service's own two 1 s waits
+ * and up to 5 s letting a running draft store write finish. With one stuck
+ * submission the stores close within about 14 s, and 15 s covers that case.
+ * Several slow closes at once can take longer; the signals are then the safe
+ * fallback: killing the service rolls back any unfinished SQLite write, and
+ * the next start recovers an interrupted submission.
+ */
+const SIDECAR_EXIT_TIMEOUT_MS = 15_000;
+/** The service writes its `shutdown` reply before it starts to close. */
+const SHUTDOWN_REPLY_TIMEOUT_MS = 5_000;
 
 export class SidecarError extends Error {
   constructor(
@@ -245,7 +260,7 @@ export class SidecarTransport extends EventEmitter {
     launch: DesktopLaunchConfig,
     private readonly requestTimeoutMs = 30_000,
     private readonly startupTimeoutMs = 10_000,
-    private readonly shutdownTimeoutMs = 5_000,
+    private readonly shutdownTimeoutMs = SIDECAR_EXIT_TIMEOUT_MS,
     private readonly spawnChild: SpawnChild = spawnSidecar,
     private readonly diagnostics: DiagnosticSink = consoleSink,
   ) {
@@ -712,7 +727,12 @@ export class SidecarTransport extends EventEmitter {
     this.pending.clear();
     if (!child) return;
     try {
-      const shutdown = this.request<JsonObject>("shutdown", {}, false, this.shutdownTimeoutMs);
+      const shutdown = this.request<JsonObject>(
+        "shutdown",
+        {},
+        false,
+        Math.min(this.shutdownTimeoutMs, SHUTDOWN_REPLY_TIMEOUT_MS),
+      );
       await shutdown.result;
     } catch {
       // The bounded process shutdown below remains authoritative.

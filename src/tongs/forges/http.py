@@ -24,6 +24,7 @@ from tongs.errors import (
     ValidationError,
     redact_credentials,
 )
+from tongs.forges.models import JobLogTail
 
 log = logging.getLogger(__name__)
 
@@ -617,6 +618,44 @@ async def _stream_bytes(
         raise NetworkError(f"Request timed out: {redact_credentials(str(e))}") from e
     except httpx.RequestError as e:
         raise NetworkError(f"Transport error: {redact_credentials(str(e))}") from e
+
+
+async def request_log_tail(
+    client: httpx.AsyncClient, path: str, *, max_bytes: int
+) -> JobLogTail:
+    """GET a log at ``path`` and keep only its last ``max_bytes`` bytes.
+
+    The body is streamed into a tail buffer that never holds more than twice
+    the budget plus one chunk, so a log of any size is read in bounded memory
+    and a log over the budget yields its end instead of an error. Bytes are
+    counted after any content decoding, which is the size of the text. The
+    client's redirect policy applies as it does to ``client.get``, so a GitHub
+    log follows its redirect to blob storage. An error status is mapped with
+    ``map_http_error`` from at most ``ERROR_BODY_LIMIT`` bytes of its body.
+    """
+    if max_bytes < 0:
+        raise ValueError("max_bytes must not be negative")
+    try:
+        async with client.stream("GET", path) as response:
+            if response.status_code >= 400:
+                body = await _read_prefix(response, ERROR_BODY_LIMIT)
+                raise map_http_error(_error_response(response, body))
+            tail = bytearray()
+            total = 0
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                tail.extend(chunk)
+                if len(tail) > 2 * max_bytes + 1:
+                    # One byte before the budget shows whether the cut
+                    # falls on a line start.
+                    del tail[: len(tail) - max_bytes - 1]
+            encoding = response.charset_encoding or "utf-8"
+    except httpx.TimeoutException as e:
+        raise NetworkError(f"Request timed out: {redact_credentials(str(e))}") from e
+    except httpx.RequestError as e:
+        # Also a body that fails to decode partway through the stream.
+        raise NetworkError(f"Transport error: {redact_credentials(str(e))}") from e
+    return JobLogTail.from_bytes(bytes(tail), total, max_bytes, encoding)
 
 
 async def _read_prefix(response: httpx.Response, limit: int) -> bytes:

@@ -31,6 +31,7 @@ from tongs.forges.http import (
     paginate,
     request,
     request_bytes,
+    request_log_tail,
     request_page,
 )
 from tongs.forges.models import (
@@ -41,6 +42,7 @@ from tongs.forges.models import (
     ForgeMergeResult,
     ForgeMutationResult,
     InlineComment,
+    JobLogTail,
     MRDetail,
     MRPage,
     MRState,
@@ -1316,6 +1318,17 @@ class GitHubClient(ForgeClient):
             raise map_http_error(response)
         return response.text
 
+    async def get_job_log_tail(
+        self, repo_path: str, job_id: int, max_bytes: int
+    ) -> JobLogTail:
+        """Stream a job log and keep its last ``max_bytes`` bytes."""
+        owner, repo = _split_repo_path(repo_path)
+        return await request_log_tail(
+            self._http,
+            f"/repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
+            max_bytes=max_bytes,
+        )
+
     async def retry_job(self, repo_path: str, job_id: int) -> None:
         owner, repo = _split_repo_path(repo_path)
         await request(
@@ -1753,8 +1766,8 @@ class GitHubClient(ForgeClient):
         return Pipeline(
             id=data["id"],
             status=_parse_ci_status(data.get("status"), data.get("conclusion")),
-            ref=data.get("head_branch", ""),
-            sha=data.get("head_sha", ""),
+            ref=data.get("head_branch") or "",
+            sha=data.get("head_sha") or "",
             web_url=data.get("html_url") or "",
             source=data.get("event") or "",
             created_at=_parse_datetime(data.get("created_at")),

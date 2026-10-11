@@ -474,6 +474,7 @@ class DraftStore:
                 await self._validate_schema(db)
                 await self._prune_submitted(db)
                 self._secure_sidecars()
+                self._remove_stale_locks()
                 self._db = db
             except (DraftStoreError, OSError, sqlite3.Error) as error:
                 if db is not None:
@@ -2074,6 +2075,17 @@ class DraftStore:
             return True
         probe.release()
         return False
+
+    def _remove_stale_locks(self) -> None:
+        """Delete lock files left by processes that exited without releasing.
+
+        A lock file is only deleted after its lock is taken without blocking,
+        so an attempt a live process owns keeps its file.
+        """
+        held = frozenset(str(attempt_id) for attempt_id in self._held_attempt_locks)
+        removed = AttemptLock.remove_stale(self._lock_dir, keep=held)
+        if removed:
+            log.debug("Removed %d stale review submission lock file(s).", removed)
 
     def _require_owned(self, attempt_id: UUID) -> None:
         if attempt_id not in self._held_attempt_locks:

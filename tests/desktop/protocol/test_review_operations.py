@@ -252,7 +252,7 @@ class _Session:
         await self.get_review(review)
         return (_discussion(),)
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         await asyncio.wait_for(self.review_submissions.close(), 2)
         await asyncio.wait_for(self.mr_actions.close(), 2)
         await asyncio.wait_for(self.review_mutations.close(), 2)

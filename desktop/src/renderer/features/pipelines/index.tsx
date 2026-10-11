@@ -43,6 +43,10 @@ const LOG_WINDOW_SIZE = 300;
 const MAX_LOG_PAGES = 512;
 const MAX_LOG_ROWS = 50_000;
 const MAX_LOG_CHARACTERS = 8 * 1024 * 1024;
+const LOG_END_SHOWN =
+  "Showing the end of this job log. Earlier lines pass the desktop display limit.";
+const LOG_PAGES_LIMITED =
+  "This job log has more pages than the desktop reads. A bounded partial log is shown.";
 
 interface LoadedLog {
   readonly snapshotId: string;
@@ -424,7 +428,7 @@ function PipelineList({
             {item.value.status}
           </span>
           <strong>Pipeline #{item.value.id}</strong>
-          <span>{item.value.ref}</span>
+          {item.value.ref !== null && <span>{item.value.ref}</span>}
           <code>{shortSha(item.value.sha)}</code>
         </button>
       ))}
@@ -744,7 +748,9 @@ function LogPanel({
       {Boolean(error) && (
         <Notice kind="error">
           {loaded
-            ? "The log refresh or paging stopped. A bounded previous result is shown."
+            ? error === loaded.partialError && loaded.partialError !== null
+              ? loaded.partialError.message
+              : "The log refresh or paging stopped. A bounded previous result is shown."
             : logError(error)}
         </Notice>
       )}
@@ -1197,30 +1203,32 @@ export async function loadLogPages(
   if (first.cursor !== 0 || first.resource !== job)
     throw invalidLogPage("The first log page has an invalid identity.");
   assertLogCursor(first);
+  // Only the end of the log is kept, because that is where a job reports its
+  // failure. Rows that fall out of the character budget are dropped as later
+  // rows arrive, so memory stays bounded however long the log is.
   const chunks: string[] = [];
   let characters = 0;
+  let clipped = false;
   let page = first;
   let pageCount = 1;
   while (true) {
     for (const row of page.entries) {
-      const remaining = MAX_LOG_CHARACTERS - characters;
-      if (row.text.length > remaining) {
-        if (remaining > 0) chunks.push(row.text.slice(0, remaining));
-        return loadedLog(
-          first,
-          logLines(chunks.join(""), MAX_LOG_ROWS).lines,
-          logLimit("The job log exceeded the bounded renderer limit."),
-        );
-      }
       chunks.push(row.text);
       characters += row.text.length;
+      while (chunks.length > 1) {
+        const oldest = chunks[0] ?? "";
+        if (characters - oldest.length < MAX_LOG_CHARACTERS) break;
+        characters -= oldest.length;
+        chunks.shift();
+        clipped = true;
+      }
     }
     if (page.next_cursor === null) break;
     if (pageCount >= MAX_LOG_PAGES)
       return loadedLog(
         first,
-        logLines(chunks.join(""), MAX_LOG_ROWS).lines,
-        logLimit("The job log exceeded the bounded page limit."),
+        logTail(chunks.join(""), clipped, MAX_LOG_ROWS).lines,
+        logLimit(LOG_PAGES_LIMITED),
       );
     const cursor = page.next_cursor;
     page = await queries.run(key, () =>
@@ -1248,27 +1256,40 @@ export async function loadLogPages(
     assertLogCursor(page);
     pageCount += 1;
   }
-  const reconstructed = logLines(chunks.join(""), MAX_LOG_ROWS);
+  const reconstructed = logTail(chunks.join(""), clipped, MAX_LOG_ROWS);
   return loadedLog(
     first,
     reconstructed.lines,
-    reconstructed.truncated
-      ? logLimit("The job log exceeded the bounded line limit.")
-      : null,
+    reconstructed.truncated ? logLimit(LOG_END_SHOWN) : null,
   );
 }
 
-function logLines(
+/**
+ * Split the end of a log into at most `limit` lines of at most
+ * `MAX_LOG_CHARACTERS` characters in all. A log whose start was already
+ * dropped (`clipped`) loses its partial first line too.
+ */
+function logTail(
   text: string,
+  clipped: boolean,
   limit: number,
 ): { readonly lines: readonly string[]; readonly truncated: boolean } {
-  if (text.length === 0) return { lines: [], truncated: false };
+  let truncated = clipped;
+  if (text.length > MAX_LOG_CHARACTERS) {
+    text = text.slice(text.length - MAX_LOG_CHARACTERS);
+    truncated = true;
+  }
+  if (truncated) {
+    const newline = text.indexOf("\n");
+    if (newline !== -1 && newline < text.length - 1) text = text.slice(newline + 1);
+  }
+  if (text.length === 0) return { lines: [], truncated };
   const rawLines = text.split("\n");
   if (text.endsWith("\n")) rawLines.pop();
-  const truncated = rawLines.length > limit;
+  if (rawLines.length > limit) truncated = true;
   return {
     lines: rawLines
-      .slice(0, limit)
+      .slice(Math.max(0, rawLines.length - limit))
       .map((line) => sanitizeLogText(line.endsWith("\r") ? line.slice(0, -1) : line)),
     truncated,
   };
@@ -1443,7 +1464,9 @@ function requireReceiptBinding(
 function targetLabel(intent: MutationIntent): string {
   return intent.job
     ? `job ${intent.job.value.name} (#${intent.job.value.id}) in pipeline #${intent.pipeline.value.id}`
-    : `pipeline #${intent.pipeline.value.id} on ${intent.pipeline.value.ref}`;
+    : intent.pipeline.value.ref === null
+      ? `pipeline #${intent.pipeline.value.id}`
+      : `pipeline #${intent.pipeline.value.id} on ${intent.pipeline.value.ref}`;
 }
 
 function actionLabel(action: CIMutationAction): string {

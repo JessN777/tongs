@@ -226,10 +226,13 @@ an editor that is already running. The export then stays in place, and a later
 export removes it after 24 hours. Otherwise the export is removed when the
 editor exits, including when the editor saved it by replacing the file.
 
-Long logs load and display in bounded pages and windows. If a refresh, a page
-or a log revision check fails after output was loaded, the previous result stays
-visible with an explanation. A log beyond the renderer's safe limits is shown as
-a bounded partial result rather than filling the whole window.
+Long logs load and display in bounded pages and windows. tongs streams a log
+from the forge and keeps at most its last 8 MiB, so a log of any size opens
+without an error. When earlier output is left out, the first line of the log
+names the full size and the size shown. The view itself shows at most the last
+50,000 lines, and says **Showing the end of this job log** when it leaves
+earlier lines out. If a refresh, a page or a log revision check fails after
+output was loaded, the previous result stays visible with an explanation.
 
 ### CI actions and outcomes
 

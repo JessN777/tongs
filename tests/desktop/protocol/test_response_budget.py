@@ -88,7 +88,7 @@ class _Session:
     async def start(self) -> _Session:
         return self
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         self.closed = True
 
     async def events(self) -> AsyncIterator[ServiceEvent]:

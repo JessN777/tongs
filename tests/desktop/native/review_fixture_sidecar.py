@@ -263,7 +263,7 @@ class _FixtureSession:
         await self._store.open()
         return self
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         await self.review_submissions.close()
         await self.mr_actions.close()
         await self.review_mutations.close()

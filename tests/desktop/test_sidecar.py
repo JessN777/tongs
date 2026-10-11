@@ -28,6 +28,7 @@ from tongs.desktop.protocol.server import (
     _recovery_notices,
 )
 from tongs.desktop.protocol.state import HandleKind
+from tongs.forges.models import JobLogTail
 from tongs.plugins.desktop import (
     DesktopCallContext,
     DesktopCancellation,
@@ -114,6 +115,7 @@ class _FakeSession:
         self.config = Config()
         self.started = False
         self.closed = False
+        self.final_close = False
         self.read_started = asyncio.Event()
         self.read_cancelled = asyncio.Event()
         self.release_read = asyncio.Event()
@@ -123,8 +125,9 @@ class _FakeSession:
         self.started = True
         return self
 
-    async def close(self) -> None:
+    async def close(self, *, final: bool = False) -> None:
         self.closed = True
+        self.final_close = final
 
     async def events(self) -> AsyncIterator[ServiceEvent]:
         await asyncio.Future()
@@ -149,6 +152,10 @@ class _FakeSession:
 
     async def get_job_log(self, _job: JobRef) -> str:
         return self.log
+
+    async def get_job_log_tail(self, _job: JobRef, max_bytes: int) -> JobLogTail:
+        data = self.log.encode()
+        return JobLogTail.from_bytes(data, len(data), max_bytes)
 
 
 def _registry() -> DesktopPluginRegistry:
@@ -352,6 +359,8 @@ async def test_read_cancellation_and_shutdown_drain_pending_request() -> None:
     assert (await writer.frames.get())["result"] == {"accepted": True}
     await task
     assert session.closed
+    # The process exits next, so the session closes for good (#442).
+    assert session.final_close
     assert not server._pending
 
 
@@ -387,6 +396,8 @@ async def test_eof_cancels_pending_read_and_closes_session() -> None:
     assert cancelled["error"]["code"] == "request_cancelled"  # type: ignore[index]
     await task
     assert session.closed
+    # The process exits next, so the session closes for good (#442).
+    assert session.final_close
     assert not server._pending
 
 
@@ -627,9 +638,93 @@ async def test_plugin_read_outer_cancellation_drains_service_and_waiter_tasks() 
     with pytest.raises(asyncio.CancelledError):
         await read
 
-    assert cancellation.cancelled
+    # The read stops, but the caller's token, often the plugin's lifetime
+    # token, stays usable (#312).
+    assert not cancellation.cancelled
     assert session.read_cancelled.is_set()
     assert cancellation.wait_finished.is_set()
+
+
+class _FailingOnceSession(_FakeSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads = 0
+
+    async def discover_repositories(self) -> tuple[RepositorySnapshot, ...]:
+        self.reads += 1
+        if self.reads == 1:
+            raise RuntimeError("forge unreachable")
+        self.release_read.set()
+        return await super().discover_repositories()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_plugin_read_leaves_the_callers_token_usable() -> None:
+    session = _FailingOnceSession()
+    server = DesktopSidecarServer(
+        session=cast(object, session),
+        plugin_registry=_registry(),
+        shutdown_timeout=0.2,
+    )
+    manifest = DesktopPluginManifest(
+        "alpha",
+        "Alpha",
+        "1.0",
+        DesktopCompatibility(1),
+        (),
+        (),
+        reads=(DesktopReadKind.REPOSITORIES,),
+    )
+    facade = server._facade_for_plugin("alpha", manifest)
+    lifetime = DesktopCancellation()
+
+    with pytest.raises(RuntimeError, match="unreachable"):
+        await facade.read(
+            DesktopReadKind.REPOSITORIES, freeze_json_object({}), lifetime
+        )
+    assert not lifetime.cancelled
+
+    second = await facade.read(
+        DesktopReadKind.REPOSITORIES, freeze_json_object({}), lifetime
+    )
+
+    assert session.reads == 2
+    assert not lifetime.cancelled
+    repositories = cast(dict[str, tuple[dict[str, str], ...]], second)
+    assert [item["display_name"] for item in repositories["repositories"]] == [
+        "project"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_caller_token_still_stops_the_read() -> None:
+    session = _FakeSession()
+    server = DesktopSidecarServer(
+        session=cast(object, session),
+        plugin_registry=_registry(),
+        shutdown_timeout=0.2,
+    )
+    manifest = DesktopPluginManifest(
+        "alpha",
+        "Alpha",
+        "1.0",
+        DesktopCompatibility(1),
+        (),
+        (),
+        reads=(DesktopReadKind.REPOSITORIES,),
+    )
+    facade = server._facade_for_plugin("alpha", manifest)
+    lifetime = DesktopCancellation()
+    read = asyncio.create_task(
+        facade.read(DesktopReadKind.REPOSITORIES, freeze_json_object({}), lifetime)
+    )
+    await session.read_started.wait()
+
+    lifetime.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await read
+    assert session.read_cancelled.is_set()
 
 
 def test_actual_sidecar_exits_cleanly_on_eof(tmp_path: Path) -> None:

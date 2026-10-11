@@ -10,6 +10,7 @@ import os
 import sqlite3
 import stat
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -53,6 +54,7 @@ from tongs.state.drafts import (
     context_fingerprint,
     default_draft_db_path,
 )
+from tongs.state.drafts import _locks as locks_module
 from tongs.state.drafts import store as store_module
 from tongs.state.drafts._locks import AttemptLock
 
@@ -173,7 +175,8 @@ async def test_database_and_sidecars_are_private(db_path: Path) -> None:
     assert stat.S_IMODE(lock_dir.stat().st_mode) == 0o700
     assert stat.S_IMODE(lock_file.stat().st_mode) == 0o600
     await store.close()
-    assert lock_file.exists()
+    # Releasing ownership deletes the file; it carries no state of its own.
+    assert not lock_file.exists()
 
 
 @pytest.mark.asyncio
@@ -506,7 +509,11 @@ async def test_child_process_death_releases_attempt_for_unknown_recovery(
     await observer.open()
     attempt = (await observer.list_drafts())[0]
     assert attempt.state == DraftState.SUBMITTING
+    # Opening the store leaves the live child's lock file in place.
+    held = _lock_files(db_path)
+    assert len(held) == 1
     assert await observer.recover_incomplete_attempts() == ()
+    assert _lock_files(db_path) == held
 
     child.terminate()
     await asyncio.to_thread(child.join, 10)
@@ -514,6 +521,8 @@ async def test_child_process_death_releases_attempt_for_unknown_recovery(
     recovered = await observer.recover_incomplete_attempts()
     assert len(recovered) == 1
     assert recovered[0].state == DraftState.UNKNOWN
+    assert held == [f"{recovered[0].id}.lock"]
+    assert _lock_files(db_path) == []
     await observer.close()
 
 
@@ -753,6 +762,187 @@ async def test_attempt_lock_rejects_symlink_without_touching_target(
     assert target.read_text() == "preserve"
     assert (await store.get_draft(draft.id)).state == DraftState.EDITABLE
     await store.close()
+
+
+def _lock_files(db_path: Path) -> list[str]:
+    lock_dir = db_path.with_name(f"{db_path.name}.locks")
+    if not lock_dir.exists():
+        return []
+    return sorted(path.name for path in lock_dir.iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX unlink while held")
+async def test_completion_commits_then_unlinks_then_unlocks_attempt_lock(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = DraftStore(db_path)
+    await store.open()
+    draft = await store.create_draft(REVIEW, REVISION)
+    attempt = await store.lock_submission(draft.id, draft.version)
+    lock_file = db_path.with_name(f"{db_path.name}.locks") / f"{attempt.id}.lock"
+    assert _lock_files(db_path) == [lock_file.name]
+    unlocks: list[tuple[bool, str]] = []
+    original_flock = locks_module.fcntl.flock
+
+    def recording_flock(fd: int, operation: int) -> None:
+        if operation == locks_module.fcntl.LOCK_UN:
+            with sqlite3.connect(db_path) as reader:
+                (state,) = reader.execute(
+                    "SELECT state FROM drafts WHERE id = ?", (str(draft.id),)
+                ).fetchone()
+            unlocks.append((lock_file.exists(), state))
+        original_flock(fd, operation)
+
+    monkeypatch.setattr(locks_module.fcntl, "flock", recording_flock)
+    await store.complete_submission(attempt.id)
+    monkeypatch.setattr(locks_module.fcntl, "flock", original_flock)
+
+    # The submitted state is committed and the file is gone before unlocking.
+    assert unlocks == [(False, DraftState.SUBMITTED.value)]
+    assert _lock_files(db_path) == []
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_final_attempt_states_leave_no_lock_files(db_path: Path) -> None:
+    store = DraftStore(db_path)
+    await store.open()
+    submitted = await store.create_draft(REVIEW, REVISION)
+    cancelled = await store.create_draft(
+        ReviewRef(REVIEW.repository, REVIEW.number + 1), REVISION
+    )
+    reconciled = await store.create_draft(
+        ReviewRef(REVIEW.repository, REVIEW.number + 2), REVISION
+    )
+
+    first = await store.lock_submission(submitted.id, submitted.version)
+    await store.complete_submission(first.id)
+    second = await store.lock_submission(cancelled.id, cancelled.version)
+    await store.cancel_submission(second.id)
+    third = await store.lock_submission(reconciled.id, reconciled.version)
+    await store.mark_attempt_unknown(third.id)
+    await store.reconcile_attempt(third.id, ReconciliationResolution.MARK_SUBMITTED)
+
+    assert _lock_files(db_path) == []
+    await store.close()
+
+
+def _age(path: Path) -> None:
+    """Make a lock file look like a leftover from a crashed process."""
+    old = time.time() - 3600
+    os.utime(path, (old, old), follow_symlinks=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX lock file policy")
+async def test_open_removes_only_stale_lock_files_it_can_lock(db_path: Path) -> None:
+    setup = DraftStore(db_path)
+    await setup.open()
+    await setup.close()
+    lock_dir = db_path.with_name(f"{db_path.name}.locks")
+    lock_dir.mkdir(mode=0o700)
+    stale = lock_dir / f"{uuid4()}.lock"
+    stale.touch(mode=0o600)
+    _age(stale)
+    # A fresh unheld file may be a submission about to lock it.
+    fresh = lock_dir / f"{uuid4()}.lock"
+    fresh.touch(mode=0o600)
+    live = AttemptLock.try_acquire(lock_dir, str(uuid4()))
+    assert live is not None
+    shared = lock_dir / f"{uuid4()}.lock"
+    shared.touch()
+    shared.chmod(0o644)
+    unrelated = lock_dir / "notes.lock"
+    unrelated.touch(mode=0o600)
+    target = db_path.parent / "target"
+    target.write_text("preserve")
+    target.chmod(0o600)
+    linked = lock_dir / f"{uuid4()}.lock"
+    linked.symlink_to(target)
+    # Old enough to be candidates, so the other guards decide.
+    for path in (live.path, shared, unrelated, linked):
+        _age(path)
+
+    store = DraftStore(db_path)
+    await store.open()
+
+    assert not stale.exists()
+    assert fresh.exists()
+    # A lock another owner holds keeps its file and its ownership.
+    assert live.path.exists()
+    assert AttemptLock.try_acquire(lock_dir, live.path.stem) is None
+    # Files that fail the private-file checks or are not attempt locks stay.
+    assert shared.exists()
+    assert unrelated.exists()
+    assert linked.is_symlink()
+    assert target.read_text() == "preserve"
+    live.release()
+    assert not live.path.exists()
+    await store.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX inode re-check")
+def test_attempt_lock_rejects_descriptor_to_unlinked_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_dir = tmp_path / "locks"
+    attempt_id = str(uuid4())
+    holder = AttemptLock.try_acquire(lock_dir, attempt_id)
+    assert holder is not None
+    # A second process opened the path before the holder unlinked it.
+    stale = os.open(holder.path, os.O_RDWR)
+    holder.release()
+    assert not holder.path.exists()
+    stale_descriptors = [stale, os.dup(stale)]
+    monkeypatch.setattr(
+        locks_module, "_open_lock_file", lambda _path: stale_descriptors.pop()
+    )
+
+    # The old descriptor locks without blocking, but it names a deleted inode,
+    # so both tries are refused instead of granting a second owner.
+    assert AttemptLock.try_acquire(lock_dir, attempt_id) is None
+    assert stale_descriptors == []
+    monkeypatch.undo()
+
+    fresh = AttemptLock.try_acquire(lock_dir, attempt_id)
+    assert fresh is not None
+    assert fresh.path.exists()
+    assert AttemptLock.try_acquire(lock_dir, attempt_id) is None
+    fresh.release()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX inode re-check")
+def test_attempt_lock_retries_once_after_stale_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_dir = tmp_path / "locks"
+    attempt_id = str(uuid4())
+    holder = AttemptLock.try_acquire(lock_dir, attempt_id)
+    assert holder is not None
+    stale = os.open(holder.path, os.O_RDWR)
+    holder.release()
+    opened: list[str] = []
+    real_open = locks_module._open_lock_file
+
+    def stale_then_real(path: Path) -> int:
+        if not opened:
+            opened.append("stale")
+            return stale
+        opened.append("fresh")
+        return real_open(path)
+
+    monkeypatch.setattr(locks_module, "_open_lock_file", stale_then_real)
+    owner = AttemptLock.try_acquire(lock_dir, attempt_id)
+    monkeypatch.undo()
+
+    assert owner is not None
+    assert opened == ["stale", "fresh"]
+    # The retry owns the file now at the path, so nobody else can take it.
+    assert owner.path.exists()
+    assert AttemptLock.try_acquire(lock_dir, attempt_id) is None
+    owner.release()
+    assert not owner.path.exists()
 
 
 @pytest.mark.asyncio

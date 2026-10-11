@@ -230,6 +230,36 @@ test("a pipeline and job the forge left partly blank still render", async () => 
   assert.deepEqual(opened, []);
 });
 
+test("a workflow run without a branch renders without a ref (#443)", async () => {
+  const bare = pipeline(101);
+  const bridge = baseBridge({
+    listReviewPipelines: () =>
+      read({
+        pipelines: [{ ...bare, value: { ...bare.value, ref: null } }, pipeline(102)],
+      }),
+  });
+  const view = renderFeature(bridge);
+  await view.findByText("build-201");
+
+  const rows = [...view.container.querySelectorAll(".ci-pipeline-list .ci-pipeline")];
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => row.querySelectorAll("span").length),
+    [1, 2],
+  );
+  assert.equal(rows[0].textContent.includes("branch-101"), false);
+  assert.equal(rows[1].textContent.includes("branch-102"), true);
+  const meta = view.container.querySelector(".ci-summary .ci-meta").textContent;
+  assert.equal(meta.startsWith("push · "), true);
+  assert.equal(meta.split(" · ").length, 2);
+
+  fireEvent.click(view.getByRole("button", { name: "Retry pipeline" }));
+  const prompt = view.getByRole("alertdialog").textContent;
+  assert.equal(prompt.includes("pipeline #101. This sends"), true);
+  assert.equal(prompt.includes(" on "), false);
+  assert.equal(view.container.textContent.includes("null"), false);
+});
+
 test("loaded selected job opens in editor once and reports exact outcome", async () => {
   const jobs = [];
   const completion = deferred();
@@ -466,12 +496,24 @@ test("log reconstruction enforces identity, revision, line, and text bounds", as
         revision: { sha256: "hash", byte_count: 99 },
       }),
   };
+  // Past the line limit the end of the log is kept, where a job reports
+  // its failure.
   const loaded = await loadLogPages("job", bridge, new QueryCoordinator(bridge));
-  assert.equal(loaded.lines[0], "one");
-  assert.equal(loaded.lines[1], "two");
   assert.equal(loaded.lines.length, 50_000);
+  assert.equal(loaded.lines[0], "x");
+  assert.equal(loaded.lines.at(-1), "x");
   assert.equal(loaded.partialError.code, "pagination_limit");
+  assert.match(loaded.partialError.message, /^Showing the end of this job log\./);
   assert.equal(sanitizeLogText("safe\u0000\u001b[31mred\u001b[0m"), "safe�red");
+
+  const small = {
+    cancelRead: async () => true,
+    openLog: () => read(logPage("job", 0, null, "one\r\n\u001b]0;title\u0007two\n")),
+    pageLog: () => assert.fail("a one-page log reads no further page"),
+  };
+  const whole = await loadLogPages("job", small, new QueryCoordinator(small));
+  assert.deepEqual([...whole.lines], ["one", "two"]);
+  assert.equal(whole.partialError, null);
 
   const inconsistent = {
     cancelRead: async () => true,
@@ -499,6 +541,31 @@ test("log reconstruction enforces identity, revision, line, and text bounds", as
       (error) => error.code === "revision_changed",
     );
   }
+});
+
+test("a log past the character limit keeps its end from a line start", async () => {
+  // Rows of 1 Mi characters: nine of them pass the 8 Mi character limit.
+  const row = (label) => `${label}${"y".repeat(1024 * 1024 - label.length - 1)}\n`;
+  const rows = Array.from({ length: 9 }, (_, index) => row(`row-${index}:`));
+  rows.push("the build failed here\n");
+  const bridge = {
+    cancelRead: async () => true,
+    openLog: () => read({ ...logPage("job", 0, 1, rows[0]) }),
+    pageLog: ({ cursor }) =>
+      read({
+        ...logPage("job", cursor, cursor + 1 < rows.length ? cursor + 1 : null, rows[cursor]),
+      }),
+  };
+  const loaded = await loadLogPages("job", bridge, new QueryCoordinator(bridge));
+  assert.equal(loaded.lines.at(-1), "the build failed here");
+  assert.equal(loaded.lines[0].startsWith("row-"), true);
+  assert.equal(loaded.lines.some((line) => line.startsWith("row-0:")), false);
+  assert.equal(
+    loaded.lines.reduce((total, line) => total + line.length + 1, 0) <= 8 * 1024 * 1024,
+    true,
+  );
+  assert.equal(loaded.partialError.code, "pagination_limit");
+  assert.match(loaded.partialError.message, /^Showing the end of this job log\./);
 });
 
 test("known pre-dispatch failures and ambiguous transport failures stay distinct", () => {

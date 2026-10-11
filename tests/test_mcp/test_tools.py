@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -23,7 +24,7 @@ from tests.test_mcp.forge_fakes import (
 from tongs.diff.conversion import convert_forge_changes
 from tongs.mcp import tools
 from tongs.mcp.tools import ToolFailure
-from tongs.services.errors import ServiceError
+from tongs.services.errors import ServiceError, ServiceErrorCode
 from tongs.services.session import ApplicationSession
 
 
@@ -503,6 +504,34 @@ class TestSessionHolder:
         assert holder.current is None
         with pytest.raises(ServiceError, match="closed"):
             first.issued_repositories  # noqa: B018
+
+    @pytest.mark.asyncio
+    async def test_close_after_failed_submission_cleanup_closes_every_store(
+        self, tmp_path
+    ) -> None:
+        # A store left open keeps its aiosqlite worker thread, which is not a
+        # daemon thread, so tongs-mcp would not exit after it stops (#442).
+        before = set(threading.enumerate())
+        holder = tools.SessionHolder(lambda: make_session(tmp_path))
+        session = await holder.get()
+        workers = [
+            thread
+            for thread in set(threading.enumerate()) - before
+            if "_connection_worker_thread" in thread.name
+        ]
+        assert len(workers) == 2
+        session.review_submissions.close = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("review submission tasks did not stop")
+        )
+
+        with pytest.raises(ServiceError) as raised:
+            await holder.close()
+
+        assert raised.value.code is ServiceErrorCode.SHUTDOWN_FAILED
+        assert holder.current is None
+        for thread in workers:
+            await asyncio.to_thread(thread.join, 5)
+        assert [thread.is_alive() for thread in workers] == [False, False]
 
     @pytest.mark.asyncio
     async def test_failed_start_is_retried(self, tmp_path) -> None:

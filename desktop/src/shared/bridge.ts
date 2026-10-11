@@ -154,7 +154,7 @@ export interface DiscussionsRevisionDto extends JsonObject { readonly discussion
 export interface DiscussionsPage extends DiscussionsResult { readonly snapshot_id: string; readonly resource: OpaqueHandle; readonly revision: DiscussionsRevisionDto; readonly cursor: number; readonly next_cursor: number | null; }
 export interface CommitDto { readonly sha: string; readonly short_sha: string; readonly title: string; readonly message: string; readonly author: UserDto; readonly created_at: string | null; readonly web_url: string | null; }
 export interface CommitsResult { readonly commits: readonly CommitDto[]; }
-export interface PipelineDto { readonly id: number; readonly status: string; readonly ref: string; readonly sha: string; readonly web_url: string | null; readonly source: string | null; readonly created_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; }
+export interface PipelineDto { readonly id: number; readonly status: string; readonly ref: string | null; readonly sha: string; readonly web_url: string | null; readonly source: string | null; readonly created_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; }
 export interface PipelineItemDto { readonly handle: OpaqueHandle; readonly value: PipelineDto; }
 export interface PipelinesResult { readonly pipelines: readonly PipelineItemDto[]; }
 export interface ListPipelinesParams { readonly repository: OpaqueHandle; readonly per_page?: number; }
