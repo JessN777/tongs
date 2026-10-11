@@ -54,6 +54,8 @@ interface LoadedLog {
   readonly revision: LogPage["revision"];
   readonly lines: readonly string[];
   readonly partialError: RendererReadError | null;
+  /** Information about a complete read, such as only the end being kept. */
+  readonly notice: string | null;
 }
 
 interface MutationIntent {
@@ -745,6 +747,7 @@ function LogPanel({
         <Notice kind={editorNotice.kind}>{editorNotice.message}</Notice>
       )}
       {loading && !loaded && <Notice kind="loading">Loading job log…</Notice>}
+      {loaded?.notice && <Notice kind="status">{loaded.notice}</Notice>}
       {Boolean(error) && (
         <Notice kind="error">
           {loaded
@@ -1262,10 +1265,13 @@ export async function loadLogPages(
     pageCount += 1;
   }
   const reconstructed = logTail(chunks.join(""), clipped, MAX_LOG_ROWS);
+  // Keeping only the end is the expected outcome for a long log, so it is
+  // reported as information rather than as a failed read (#447).
   return loadedLog(
     first,
     reconstructed.lines,
-    reconstructed.truncated ? logLimit(LOG_END_SHOWN) : null,
+    null,
+    reconstructed.truncated ? LOG_END_SHOWN : null,
   );
 }
 
@@ -1367,6 +1373,7 @@ function loadedLog(
   first: LogPage,
   lines: readonly string[],
   partialError: RendererReadError | null,
+  notice: string | null = null,
 ): LoadedLog {
   return Object.freeze({
     snapshotId: first.snapshot_id,
@@ -1374,6 +1381,7 @@ function loadedLog(
     revision: first.revision,
     lines: Object.freeze([...lines]),
     partialError,
+    notice,
   });
 }
 

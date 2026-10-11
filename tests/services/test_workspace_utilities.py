@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 import pytest
 
 from tongs.config import Config
-from tongs.forges.models import CIStatus, ForgeHost, MRDetail, MRState, User
+from tongs.forges.models import (
+    CIStatus,
+    ForgeHost,
+    JobLogTail,
+    MRDetail,
+    MRState,
+    User,
+)
 from tongs.scanner.repo import ForgeType
 from tongs.services.errors import ServiceError, ServiceErrorCode
 from tongs.services.models import (
@@ -69,14 +76,17 @@ class Calls:
         self.reservations: list[tuple[int, str]] = []
         self.releases: list[tuple[int, str]] = []
         self.capacity = True
+        self.log = b"line one\nline two\n"
+        self.budgets: list[int] = []
 
     async def get_review(self, review: ReviewRef) -> ReviewSnapshot:
         self.reviews.append(review)
         return _snapshot(self.url)
 
-    async def get_job_log(self, job: JobRef) -> str:
+    async def get_job_log_tail(self, job: JobRef, max_bytes: int) -> JobLogTail:
         self.jobs.append(job)
-        return "line one\nline two\n"
+        self.budgets.append(max_bytes)
+        return JobLogTail.from_bytes(self.log, len(self.log), max_bytes)
 
     async def clear_cache(self) -> None:
         self.cache_clears += 1
@@ -104,7 +114,7 @@ def _service(
     return WorkspaceUtilityService(
         config=config or Config(editor_command="code --wait"),
         get_review=calls.get_review,
-        get_job_log=calls.get_job_log,
+        get_job_log_tail=calls.get_job_log_tail,
         clear_cache=calls.clear_cache,
         reserve_editor_export=calls.reserve_editor_export,
         release_editor_export=calls.release_editor_export,
@@ -200,30 +210,65 @@ async def test_editor_plan_parses_arguments_without_a_shell() -> None:
 
 
 @pytest.mark.asyncio
-async def test_editor_plan_rejects_oversized_log_without_truncation() -> None:
+async def test_a_log_within_the_editor_budget_is_exported_whole() -> None:
     calls = Calls()
+    calls.log = b"x" * 1023 + b"\n"
 
-    async def oversized(job: JobRef) -> str:
-        calls.jobs.append(job)
-        return "four"
+    result = await _service(calls, max_bytes=1024).prepare_editor_log(JOB)
 
-    service = WorkspaceUtilityService(
-        config=Config(editor_command="code --wait"),
-        get_review=calls.get_review,
-        get_job_log=oversized,
-        clear_cache=calls.clear_cache,
-        reserve_editor_export=calls.reserve_editor_export,
-        release_editor_export=calls.release_editor_export,
-        environment={},
-        max_editor_log_bytes=3,
-        token_factory=lambda: "1" * 32,
-    )
+    assert result.status is EditorPlanStatus.READY
+    assert result.content == "x" * 1023 + "\n"
+    assert calls.budgets == [1024]
+    assert calls.releases == []
 
-    result = await service.prepare_editor_log(JOB)
+
+@pytest.mark.asyncio
+async def test_a_log_over_the_editor_budget_exports_its_end_after_a_note() -> None:
+    calls = Calls()
+    calls.log = b"".join(f"line {index:04d}\n".encode() for index in range(1000))
+
+    result = await _service(calls, max_bytes=1024).prepare_editor_log(JOB)
+
+    assert result.status is EditorPlanStatus.READY
+    assert calls.budgets == [1024]
+    content = result.content
+    assert content is not None
+    assert len(content.encode()) <= 1024
+    note, _, rest = content.partition("\n")
+    assert note.startswith("[tongs] This job log is 9.8 KiB. Showing the last ")
+    assert note.endswith(" bytes; earlier output is left out.")
+    assert rest.startswith("line ")
+    assert rest.endswith("line 0999\n")
+    assert len(rest.splitlines()) > 50
+    assert calls.releases == []
+
+
+@pytest.mark.asyncio
+async def test_an_editor_budget_too_small_for_the_note_is_refused() -> None:
+    calls = Calls()
+    calls.log = b"four"
+
+    result = await _service(calls, max_bytes=3).prepare_editor_log(JOB)
 
     assert result.status is EditorPlanStatus.LOG_TOO_LARGE
     assert result.content is None
     assert calls.jobs == [JOB]
+    assert calls.releases == [(1, "1" * 32)]
+
+
+@pytest.mark.asyncio
+async def test_an_invalid_tail_is_refused_and_releases_the_reservation() -> None:
+    calls = Calls()
+
+    async def invalid(_job: JobRef, _max_bytes: int) -> JobLogTail:
+        return "not a tail"  # type: ignore[return-value]
+
+    service = _service(calls)
+    service._get_job_log_tail = invalid
+    with pytest.raises(ServiceError) as caught:
+        await service.prepare_editor_log(JOB)
+
+    assert caught.value.code is ServiceErrorCode.INVALID_RESPONSE
     assert calls.releases == [(1, "1" * 32)]
 
 
@@ -267,13 +312,13 @@ async def test_review_url_rejects_snapshot_for_different_review() -> None:
 async def test_log_fetch_failure_releases_editor_reservation() -> None:
     calls = Calls()
 
-    async def fail(_job: JobRef) -> str:
+    async def fail(_job: JobRef, _max_bytes: int) -> JobLogTail:
         raise RuntimeError("fetch failed")
 
     service = WorkspaceUtilityService(
         config=Config(editor_command="code --wait"),
         get_review=calls.get_review,
-        get_job_log=fail,
+        get_job_log_tail=fail,
         clear_cache=calls.clear_cache,
         reserve_editor_export=calls.reserve_editor_export,
         release_editor_export=calls.release_editor_export,
