@@ -154,10 +154,19 @@ def test_development_version_is_derived_from_exact_head(
     assert identity.rpm_release == "0.1.20260908git1234567"
 
 
-def test_payload_validator_accepts_declared_regular_files(tmp_path: Path) -> None:
-    payload = b"accepted bytes"
+def _accepted_payload(
+    tmp_path: Path,
+    files: list[tuple[str, bytes, bool, str, int]],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Write an accepted archive and its evidence for ``validate_accepted_payload``.
+
+    Each file is ``(path, contents, executable, inventory_mode, archive_mode)``:
+    the install manifest declares ``executable``, the runtime inventory records
+    ``inventory_mode`` and the archive member carries ``archive_mode``.
+    """
+
     source_date_epoch = 100
-    install = {
+    install: dict[str, object] = {
         "schema_version": 1,
         "release_version": "0.5.0",
         "electron_version": "44.2.0",
@@ -182,11 +191,12 @@ def test_payload_validator_accepts_declared_regular_files(tmp_path: Path) -> Non
         },
         "files": [
             {
-                "path": "runtime/file",
-                "byte_count": len(payload),
-                "sha256": hashlib.sha256(payload).hexdigest(),
-                "executable": False,
+                "path": path,
+                "byte_count": len(contents),
+                "sha256": hashlib.sha256(contents).hexdigest(),
+                "executable": executable,
             }
+            for path, contents, executable, _inventory_mode, _archive_mode in files
         ],
     }
     install_bytes = (json.dumps(install) + "\n").encode()
@@ -201,11 +211,12 @@ def test_payload_validator_accepts_declared_regular_files(tmp_path: Path) -> Non
         "schema_version": 1,
         "files": [
             {
-                "path": "runtime/file",
-                "byte_count": len(payload),
-                "mode": "0644",
-                "sha256": hashlib.sha256(payload).hexdigest(),
+                "path": path,
+                "byte_count": len(contents),
+                "mode": inventory_mode,
+                "sha256": hashlib.sha256(contents).hexdigest(),
             }
+            for path, contents, _executable, inventory_mode, _archive_mode in files
         ],
     }
     (tmp_path / "runtime-inventory.json").write_text(json.dumps(runtime_inventory))
@@ -216,7 +227,10 @@ def test_payload_validator_accepts_declared_regular_files(tmp_path: Path) -> Non
     with tarfile.open(archive_path, "w:gz") as archive:
         for name, contents, mode in (
             ("desktop-install.json", install_bytes, 0o644),
-            ("runtime/file", payload, 0o644),
+            *(
+                (path, contents, archive_mode)
+                for path, contents, _executable, _inventory_mode, archive_mode in files
+            ),
         ):
             member = tarfile.TarInfo(name)
             member.size = len(contents)
@@ -255,10 +269,48 @@ def test_payload_validator_accepts_declared_regular_files(tmp_path: Path) -> Non
             "compatibility": install["compatibility"],
         },
     }
+    return manifest, install
+
+
+def test_payload_validator_accepts_declared_regular_files(tmp_path: Path) -> None:
+    manifest, install = _accepted_payload(
+        tmp_path, [("runtime/file", b"accepted bytes", False, "0644", 0o644)]
+    )
 
     result = contract.validate_accepted_payload(manifest, tmp_path)
 
     assert result == install
+
+
+def test_payload_validator_records_executables_as_mode_0755(tmp_path: Path) -> None:
+    manifest, install = _accepted_payload(
+        tmp_path,
+        [
+            ("runtime/resources/app.asar", b"asar", False, "0644", 0o644),
+            ("runtime/tongs-desktop", b"launcher", True, "0755", 0o755),
+        ],
+    )
+
+    result = contract.validate_accepted_payload(manifest, tmp_path)
+
+    assert result == install
+    launcher = next(
+        item for item in result["files"] if item["path"] == "runtime/tongs-desktop"
+    )
+    assert launcher["executable"] is True
+
+
+@pytest.mark.parametrize("inventory_mode", ["0644", "0775", "0700"])
+def test_payload_validator_rejects_an_executable_inventory_mode_other_than_0755(
+    tmp_path: Path, inventory_mode: str
+) -> None:
+    manifest, _install = _accepted_payload(
+        tmp_path,
+        [("runtime/tongs-desktop", b"launcher", True, inventory_mode, 0o755)],
+    )
+
+    with pytest.raises(RuntimeError, match="inventories disagree"):
+        contract.validate_accepted_payload(manifest, tmp_path)
 
 
 def test_payload_validator_rejects_links(tmp_path: Path) -> None:

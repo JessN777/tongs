@@ -382,6 +382,68 @@ test("a durable pending review is visible before the first press and is adopted,
   assert.equal(view.getByText("2 pending").textContent, "2 pending");
 });
 
+test("Start a review pressed before the recovered draft loads adopts it rather than creating one", async () => {
+  const review = "review-composer-early-press";
+  let answer = () => {};
+  const held = new Promise((resolve) => {
+    answer = resolve;
+  });
+  let reads = 0;
+  const creates = [];
+  const saves = [];
+  const recovered = draft(review, 3, [
+    inlineEntry("entry-a", "Written in the TUI", 10),
+  ]);
+  const view = renderDiff(
+    diffBridge(review, {
+      // The mount read is held open until the press has been made.
+      listReviewDrafts: () => {
+        reads += 1;
+        return { requestToken: crypto.randomUUID(), result: held };
+      },
+      createReviewDraft: async (params) => {
+        creates.push(params);
+        return { ...draft(review, 1, []), id: "77777777-7777-4777-8777-777777777777" };
+      },
+      saveReviewDraft: async (params) => {
+        saves.push(params);
+        return draft(review, params.expected_version + 1, params.content.comments);
+      },
+    }),
+    review,
+  );
+  fireEvent.click(
+    await view.findByRole("button", { name: "Comment on new line 11" }),
+  );
+  fireEvent.change(await view.findByLabelText("Inline review comment"), {
+    target: { value: "Guard the zero divisor" },
+  });
+  // Nothing has been recovered yet, so the composer still offers to start one.
+  const start = await enabledButton(view, "Start a review");
+  fireEvent.click(start);
+  await Promise.resolve();
+  assert.equal(saves.length, 0);
+  assert.equal(creates.length, 0);
+
+  answer({ cursor: 0, next_cursor: null, drafts: [recovered] });
+  await waitForCount(() => saves.length, 1);
+  assert.equal(creates.length, 0);
+  assert.equal(reads, 1);
+  assert.equal(
+    JSON.stringify({
+      draft_id: saves[0].draft_id,
+      expected_version: saves[0].expected_version,
+      bodies: saves[0].content.comments.map((comment) => comment.body),
+    }),
+    JSON.stringify({
+      draft_id: recovered.id,
+      expected_version: 3,
+      bodies: ["Written in the TUI", "Guard the zero divisor"],
+    }),
+  );
+  await view.findByText("2 pending");
+});
+
 test("several recovered pending reviews refuse in their own words", async () => {
   const review = "review-composer-several";
   const creates = [];

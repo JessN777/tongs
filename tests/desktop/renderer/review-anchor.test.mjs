@@ -8,6 +8,11 @@ import {
   splitSourceContext,
   unifiedSourceContext,
 } from "../../../desktop/dist/src/renderer/features/diff/index.js";
+import {
+  anchorRange,
+  draftSelection,
+  mutationAnchor,
+} from "../../../desktop/dist/src/renderer/features/review/composer.js";
 
 const revision = { head_sha: "head", base_sha: "base", start_sha: null };
 const file = {
@@ -214,6 +219,78 @@ test("discussion jumps resolve only exact current loaded rows", () => {
   const splitLoaded = loaded("split", [file, ...splitRows]);
   assert.equal(resolveDiscussionTarget("review", splitLoaded, target).newLine, 5);
 });
+
+test("the anchor helpers order a range whose lines arrive last line first", () => {
+  const ordered = [
+    selected(11, 11, "first", "context"),
+    selected(null, 12, "second", "addition"),
+    selected(12, 13, "third", "context"),
+  ];
+  // Every UI path hands the lines over in source order today; the helpers
+  // still own the ordering, so a reversed list must describe the same range.
+  const reversed = rangeSelection("new", [...ordered].reverse());
+  assert.deepEqual(anchorRange(reversed), { startLine: 11, endLine: 13 });
+  assert.deepEqual(mutationAnchor(reversed), {
+    old_path: "old.py",
+    new_path: "new.py",
+    line: 13,
+    side: "RIGHT",
+    start_line: 11,
+    start_side: "RIGHT",
+  });
+  const draft = draftSelection(reversed);
+  assert.deepEqual(
+    [draft.startLine, draft.startSide, draft.oldLine, draft.newLine],
+    [11, "new", 12, 13],
+  );
+  const forward = rangeSelection("new", ordered);
+  assert.deepEqual(mutationAnchor(forward), mutationAnchor(reversed));
+  assert.deepEqual(draftSelection(forward), draftSelection(reversed));
+
+  const oldSide = rangeSelection("old", [
+    selected(21, null, "removed later", "deletion"),
+    selected(20, null, "removed first", "deletion"),
+  ]);
+  assert.deepEqual(anchorRange(oldSide), { startLine: 20, endLine: 21 });
+  assert.deepEqual(mutationAnchor(oldSide), {
+    old_path: "old.py",
+    new_path: "new.py",
+    line: 21,
+    side: "LEFT",
+    start_line: 20,
+    start_side: "LEFT",
+  });
+});
+
+function selected(oldLine, newLine, content, lineType) {
+  return { oldLine, newLine, content, lineType };
+}
+
+/** A multi-line selection whose last listed line is its anchor line. */
+function rangeSelection(side, selectedLines) {
+  const anchor = selectedLines.at(-1);
+  return {
+    review: "review",
+    snapshotId: "snapshot",
+    resource: "review",
+    revision,
+    fileIndex: 0,
+    hunkIndex: 0,
+    rowIndex: null,
+    oldPath: "old.py",
+    newPath: "new.py",
+    side,
+    oldLine: anchor.oldLine,
+    newLine: anchor.newLine,
+    lineType: anchor.lineType,
+    // The source context is the composer's input, not the range's order.
+    contextLines: ["first", "second", "third"],
+    contextComplete: true,
+    rangeOriginOldLine: selectedLines[0].oldLine,
+    rangeOriginNewLine: selectedLines[0].newLine,
+    selectedLines,
+  };
+}
 
 function loaded(layout, rows, partialError = null) {
   return {

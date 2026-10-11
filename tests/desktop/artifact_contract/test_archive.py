@@ -10,6 +10,7 @@ from dataclasses import replace
 
 import pytest
 
+import tongs.desktop.artifact_contract.archive as archive_module
 from tongs.desktop.artifact_contract import (
     ArchiveEntry,
     ArchiveEntryType,
@@ -25,7 +26,10 @@ from tongs.desktop.artifact_contract import (
 
 from .reference_builder import (
     ARCHIVE_NAME,
+    FILE_INPUTS,
     FIXTURE_ROOT,
+    INPUT_ROOT,
+    _build_tar_gzip,
 )
 
 
@@ -290,6 +294,33 @@ def test_inspector_enforces_entry_limit_while_reading_headers() -> None:
         inspect_archive(compressed, limits)
 
 
+def test_inspector_enforces_entry_limit_in_the_header_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install = parse_install_manifest(_fixture()[1])
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as opened:
+        for name in ("one", "two"):
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            opened.addfile(info)
+    compressed = gzip.compress(raw.getvalue(), mtime=0)
+    limits = replace(install.extraction_limits, max_entries=1)
+
+    def refuse_tarfile(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("tarfile parsed an archive over the entry limit")
+
+    # The tarfile pass repeats this check with the same message, so only a
+    # parser that never runs shows that the header preflight rejected it.
+    monkeypatch.setattr(archive_module.tarfile, "open", refuse_tarfile)
+    with pytest.raises(
+        ArtifactContractError,
+        match="Archive entry count exceeds the declared limit",
+        check=lambda e: e.code is ArtifactContractErrorCode.LIMIT_EXCEEDED,
+    ):
+        inspect_archive(compressed, limits)
+
+
 def test_inspector_enforces_cumulative_content_before_tarfile_pass() -> None:
     install = parse_install_manifest(_fixture()[1])
     raw = io.BytesIO()
@@ -408,3 +439,28 @@ def test_inspector_classifies_real_tar_link_without_following_it() -> None:
     assert inspection.entries[-1].entry_type is ArchiveEntryType.SYMLINK
     with _raised(ArtifactContractErrorCode.INVALID_LAYOUT):
         validate_archive_layout(inspection.entries, install)
+
+
+def test_archive_missing_a_declared_optional_runtime_file_is_rejected() -> None:
+    # runtime/libEGL.so is declared by the install manifest but is not one of
+    # the fixed required paths, so only the declared-file check can catch it.
+    omitted = "runtime/libEGL.so"
+    _, install_document, _ = _fixture()
+    install = parse_install_manifest(install_document)
+    assert omitted in {item.path for item in install.files}
+    files = {
+        path: (INPUT_ROOT / source).read_bytes()
+        for path, source in FILE_INPUTS.items()
+        if path != omitted
+    }
+    document = _build_tar_gzip(install_document, files)
+    release = _release_rebound_to(document)
+
+    with pytest.raises(
+        ArtifactContractError,
+        match="Archive is missing a declared file",
+        check=lambda e: e.code is ArtifactContractErrorCode.INVALID_LAYOUT,
+    ):
+        validate_artifact_archive(
+            document, ARCHIVE_NAME, release, "fedora-44-x86_64-user-archive"
+        )

@@ -60,6 +60,26 @@ def test_hosted_containers_build_offline_without_new_privileges() -> None:
     assert "pip install" not in installer
 
 
+def test_only_the_clean_install_keeps_the_capabilities_dnf_needs() -> None:
+    """``dnf`` installs packages as root and needs the default capabilities.
+
+    Every other container drops all of them, so a ``--cap-drop=all`` copied
+    onto the clean install would break it, and one removed elsewhere would
+    widen what a build step may do.
+    """
+
+    harness = (PACKAGING / "run_hosted.sh").read_text()
+    rebuilder = (PACKAGING / "rebuild_srpms.sh").read_text()
+    runs = _podman_runs(harness)
+
+    keeps_capabilities = {_program(run) for run in runs if "--cap-drop=all" not in run}
+    assert keeps_capabilities == {"install_and_verify.sh"}
+    install = next(run for run in runs if _program(run) == "install_and_verify.sh")
+    assert not any(word.startswith("--cap-drop") for word in install)
+    for run in _podman_runs(rebuilder):
+        assert "--cap-drop=all" in run, " ".join(run)
+
+
 def test_the_manual_harness_builds_on_the_pinned_plain_fedora_base() -> None:
     """The manual workflow never uses the builder image.
 

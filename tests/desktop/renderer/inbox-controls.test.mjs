@@ -557,6 +557,54 @@ test("review list filter and selection survive opening a review and returning", 
   assert.equal(document.activeElement?.dataset.reviewHandle, undefined);
 });
 
+test("changing a filter gives up the review the list was waiting to focus", async () => {
+  const alpha = reviewItem("Alpha", "open", { handle: "review-alpha" });
+  const zulu = reviewItem("Zulu", "open", { handle: "review-zulu" });
+  const calls = [];
+  const answers = [];
+  const bridge = baseBridge({
+    listReviews: (params) => {
+      calls.push(params);
+      if (calls.length === 1) return read({ items: [alpha, zulu], failures: [] });
+      const answer = deferred();
+      answers.push(answer);
+      return { requestToken: crypto.randomUUID(), result: answer.promise };
+    },
+  });
+  const feature = createInboxFeature();
+  const route = { kind: "inbox", repository: repository("repo", "Repository") };
+  const first = render(feature.render(featureContext(bridge), route));
+  await first.findByText("Zulu");
+  // Opening a review asks the list to focus it when the list is shown again.
+  fireEvent.click(first.getByText("Zulu").closest("button"));
+  cleanup();
+
+  // The list is shown again and its read has not answered yet, so the focus
+  // target is still waiting for its row.
+  const view = render(feature.render(featureContext(bridge), route));
+  await waitFor(() => assert.equal(answers.length, 1));
+  const scope = view.getByRole("button", { name: "My Reviews" });
+  scope.focus();
+  fireEvent.click(scope);
+  await waitFor(() => assert.equal(answers.length, 2));
+  assert.deepEqual(calls.at(-1), {
+    scope: "my_reviews",
+    state: "open",
+    repository: "repo",
+  });
+
+  for (const answer of answers)
+    answer.resolve({ items: [alpha, zulu], failures: [] });
+  await waitFor(() =>
+    assert.equal(
+      view.getByText("Zulu").closest("button").getAttribute("aria-current"),
+      "true",
+    ),
+  );
+  assert.equal(document.activeElement?.dataset.reviewScope, "my_reviews");
+  assert.equal(document.activeElement?.dataset.reviewHandle, undefined);
+});
+
 test("each repository scope keeps its own list selection for the session", async () => {
   const bridge = baseBridge({
     listReviews: (params) =>

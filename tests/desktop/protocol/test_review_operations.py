@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 from contextlib import suppress
+from dataclasses import fields
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -60,6 +61,7 @@ from tongs.services import (
     RawDiffSnapshot,
     RepositoryRef,
     ReviewActionTarget,
+    ReviewMutationCapabilities,
     ReviewMutationService,
     ReviewRef,
     ReviewRevision,
@@ -380,6 +382,39 @@ async def test_capabilities_use_only_admitted_handle(setup) -> None:
         "unapprove": True,
     }
     assert "github.com" not in json.dumps((mutation, actions))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "granted", [field.name for field in fields(ReviewMutationCapabilities)]
+)
+async def test_each_mutation_capability_is_reported_from_its_own_field(
+    setup, monkeypatch: pytest.MonkeyPatch, granted: str
+) -> None:
+    operations, session, handles = setup
+    # Only one flag is true, so reporting any capability from another field
+    # moves the true value to the wrong key.
+    capabilities = ReviewMutationCapabilities(
+        **{
+            field.name: field.name == granted
+            for field in fields(ReviewMutationCapabilities)
+        }
+    )
+    monkeypatch.setattr(
+        session.review_mutations,
+        "capabilities",
+        AsyncMock(return_value=capabilities),
+    )
+
+    reported = await operations.mutation_capabilities(
+        {"review": handles["review"]}, _context()
+    )
+
+    assert reported["capabilities"] == {
+        field.name: field.name == granted
+        for field in fields(ReviewMutationCapabilities)
+    }
+    session.review_mutations.capabilities.assert_awaited_once_with(REVIEW)
 
 
 @pytest.mark.asyncio
@@ -739,6 +774,39 @@ async def test_cancel_fallback_uses_full_retained_merge_command(
     else:
         assert await running == first
     session.client.merge_mr.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_draft_for_an_outdated_revision_is_refused_before_storage(
+    setup,
+) -> None:
+    operations, session, handles = setup
+    session.snapshots[REVIEW] = _snapshot(revision=CHANGED_REVISION)
+
+    with pytest.raises(ServiceError) as stale:
+        await operations.create_draft(
+            {
+                "review": handles["review"],
+                "revision": _revision_wire(REVISION),
+                "content": {"body": "summary", "verdict": None, "comments": []},
+            },
+            _context(),
+        )
+
+    assert stale.value.code is ServiceErrorCode.REVISION_CHANGED
+    assert stale.value.retryable is True
+    assert await session.drafts.list_drafts(review=REVIEW) == ()
+
+    created = await operations.create_draft(
+        {
+            "review": handles["review"],
+            "revision": _revision_wire(CHANGED_REVISION),
+            "content": {"body": "summary", "verdict": None, "comments": []},
+        },
+        _context(),
+    )
+    assert created["revision"] == _revision_wire(CHANGED_REVISION)
+    assert len(await session.drafts.list_drafts(review=REVIEW)) == 1
 
 
 @pytest.mark.asyncio

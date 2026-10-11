@@ -6,9 +6,15 @@ import { InlineAnchorStore } from "../../../desktop/dist/src/renderer/core/navig
 import { QueryCoordinator } from "../../../desktop/dist/src/renderer/core/query.js";
 import { createDiffFeature } from "../../../desktop/dist/src/renderer/features/diff/index.js";
 import {
+  ComposerRefusal,
+  reviewMutationError,
+} from "../../../desktop/dist/src/renderer/features/review/composer.js";
+import {
   clearPendingEdit,
   draftContentTranscript,
+  drawerFailureMessage,
 } from "../../../desktop/dist/src/renderer/features/review/drawer.js";
+import { ReviewWorkflowRefusal } from "../../../desktop/dist/src/renderer/features/review/state.js";
 import {
   capabilitiesReady,
   waitForCount,
@@ -1730,6 +1736,147 @@ test("the draft transcript distinguishes two entries on one anchor and marks a s
     ].join("\n"),
   );
 });
+
+/**
+ * `v` records a verdict, so it stands down while a running submission holds
+ * the draft, for the same reason the tiles are disabled. The state alone does
+ * not refuse the edit while the start is only pending, so the drawer's lock is
+ * what keeps the verdict the store is submitting.
+ */
+test("v leaves the verdict alone while a running submission locks the drawer", async () => {
+  const review = "review-drawer-locked-verdict";
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const starts = [];
+  const saves = [];
+  const view = renderDiff(
+    diffBridge(review, {
+      listReviewDrafts: () =>
+        read({
+          cursor: 0,
+          next_cursor: null,
+          drafts: [draft(review, 2, content({ body: "Ready", verdict: "approve" }))],
+        }),
+      saveReviewDraft: async (params) => {
+        saves.push(params);
+        return draft(review, params.expected_version + 1, params.content);
+      },
+      startReviewSubmission: async (params) => {
+        starts.push(params);
+        await gate;
+        return submission(review, "submitted", params.expected_version);
+      },
+    }),
+    review,
+  );
+  fireEvent.click(await view.findByRole("button", { name: /Your review/ }));
+  await capabilitiesReady(view.container, VERDICT_TILES);
+  assert.equal(checkedVerdict(view), "approve");
+
+  fireEvent.click(view.getByRole("button", { name: "Submit review" }));
+  fireEvent.click(
+    await view.findByRole("button", { name: "Confirm submit review" }),
+  );
+  await waitForCount(() => starts.length, 1);
+  await waitForCount(
+    () => view.container.querySelectorAll(`${VERDICT_TILES}:disabled`).length,
+    3,
+  );
+
+  fireEvent.keyDown(document.body, { key: "v" });
+  fireEvent.keyDown(document.body, { key: "v" });
+  assert.equal(checkedVerdict(view), "approve");
+  assert.equal(saves.length, 0);
+  assert.equal(
+    view.container.querySelectorAll(".review-drawer .notice-error").length,
+    0,
+  );
+
+  release();
+  await view.findByText("Review submitted.");
+  assert.equal(checkedVerdict(view), "approve");
+  assert.equal(starts[0].expected_version, 2);
+  assert.equal(saves.length, 0);
+});
+
+/**
+ * Several active drafts are a choice the drawer owns. Once one is adopted it
+ * is the pending review, so the list of the others is no longer offered beside
+ * it.
+ */
+test("the preserved draft list goes away once one of its drafts is adopted", async () => {
+  const review = "review-drawer-adopt-candidate";
+  const other = "66666666-6666-4666-8666-666666666666";
+  const view = renderDiff(
+    diffBridge(review, {
+      listReviewDrafts: () =>
+        read({
+          cursor: 0,
+          next_cursor: null,
+          drafts: [
+            draft(review, 2, content({ body: "First" })),
+            { ...draft(review, 5, content({ body: "Second" })), id: other },
+          ],
+        }),
+    }),
+    review,
+  );
+  const preserved = () =>
+    view.queryAllByRole("button", { name: /^Draft .* version \d+$/ }).length;
+
+  fireEvent.click(await view.findByRole("button", { name: /Your review/ }));
+  await waitForCount(() => preserved(), 2);
+  assert.equal(view.queryAllByText("Choose a preserved draft").length, 1);
+  assert.equal(view.queryAllByLabelText("Summary").length, 0);
+
+  fireEvent.click(view.getByRole("button", { name: new RegExp(`Draft ${other}`) }));
+  await view.findByLabelText("Summary");
+  assert.equal(view.getByLabelText("Summary").value, "Second");
+  await view.findByText("Version 5");
+  assert.equal(preserved(), 0);
+  assert.equal(view.queryAllByText("Choose a preserved draft").length, 0);
+  assert.equal(view.queryAllByText(/No pending review is open/).length, 0);
+});
+
+/**
+ * A refusal raised by the workflow state or the composer is already a sentence
+ * for the reader, so the drawer shows it as written. Anything else keeps the
+ * generic reporting boundary, so an internal message never reaches the reader.
+ */
+test("a drawer refusal is shown in its own words and other failures stay generic", () => {
+  assert.equal(
+    drawerFailureMessage(
+      new ReviewWorkflowRefusal("Submission operation is already pending"),
+    ),
+    "Submission operation is already pending",
+  );
+  assert.equal(
+    drawerFailureMessage(
+      new ComposerRefusal("Several pending reviews were recovered."),
+    ),
+    "Several pending reviews were recovered.",
+  );
+
+  const internal = new Error("assertion: pending.kind was undefined");
+  const generic = drawerFailureMessage(internal);
+  assert.equal(generic, reviewMutationError(internal));
+  assert.equal(generic.includes("pending.kind"), false);
+
+  const typed = {
+    code: "revision_changed",
+    message: "raw sidecar text",
+    retryable: true,
+  };
+  assert.equal(drawerFailureMessage(typed), reviewMutationError(typed));
+  assert.equal(drawerFailureMessage(typed).includes("raw sidecar text"), false);
+});
+
+function checkedVerdict(view) {
+  const checked = view.container.querySelector(`${VERDICT_TILES}:checked`);
+  return checked === null ? null : checked.value;
+}
 
 function transcript(content) {
   return [

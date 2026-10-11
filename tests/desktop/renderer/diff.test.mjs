@@ -921,3 +921,82 @@ test("a layout switch that fails while the old layout pages freezes it as a part
   ]);
   assert.equal(view.getByText("Refresh").hasAttribute("disabled"), false);
 });
+
+test("the no-newline marker row cannot be selected or commented on", async () => {
+  const review = "review-no-newline";
+  const bridge = diffBridge(review, {
+    openDiff: () =>
+      settledRead({
+        snapshot_id: "snapshot-no-newline",
+        resource: review,
+        revision,
+        cursor: 0,
+        next_cursor: null,
+        entries: [
+          ...fileRows(0, "unified"),
+          {
+            kind: "line",
+            file_index: 0,
+            hunk_index: 0,
+            old_line: null,
+            new_line: null,
+            content: "No newline at end of file",
+            line_type: "no_newline",
+          },
+        ],
+      }),
+    pageDiff: () => {
+      throw new Error("the fixture diff has one page");
+    },
+  });
+  const view = renderDiff(review, bridge);
+  const MARKER = ".diff-unified .diff-line.line-no_newline";
+  const SOURCE = ".diff-unified .diff-line.line-addition";
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(MARKER).length, 1),
+  );
+  const attributes = (row) => {
+    const code = view.container.querySelector(`${row} .line-content`);
+    return JSON.stringify({
+      className: code.className,
+      role: code.getAttribute("role"),
+      tabindex: code.getAttribute("tabindex"),
+      label: code.getAttribute("aria-label"),
+      buttons: view.container.querySelectorAll(`${row} button`).length,
+    });
+  };
+
+  // The source line beside it is selectable and commentable, so the marker's
+  // missing affordances are its own and not the fixture's.
+  assert.equal(
+    attributes(SOURCE),
+    JSON.stringify({
+      className: "line-content selectable-line",
+      role: "button",
+      tabindex: "0",
+      label: "Select new line 1",
+      buttons: 2,
+    }),
+  );
+  assert.equal(
+    attributes(MARKER),
+    JSON.stringify({
+      className: "line-content",
+      role: null,
+      tabindex: null,
+      label: null,
+      buttons: 0,
+    }),
+  );
+
+  const marker = view.container.querySelector(`${MARKER} .line-content`);
+  fireEvent.click(marker);
+  fireEvent.keyDown(marker, { key: "c" });
+  fireEvent.keyDown(marker, { key: "Enter" });
+  assert.equal(view.container.querySelectorAll(".line-selected").length, 0);
+  assert.equal(view.container.querySelectorAll(".inline-composer").length, 0);
+  assert.equal(
+    view.container.querySelectorAll(".line-number[aria-label]").length,
+    1,
+  );
+});
