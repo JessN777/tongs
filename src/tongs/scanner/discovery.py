@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import subprocess
+from collections import deque
 from pathlib import Path
 
 from tongs.scanner.remote import parse_remote_url
 from tongs.scanner.repo import Remote, Repo
+
+# Bytes read from the first line of a ``.git`` file; only its prefix matters.
+_GITDIR_LINE_LIMIT = 4096
 
 
 def discover_repos(
@@ -17,26 +21,25 @@ def discover_repos(
 ) -> list[Repo]:
     """Walk root directory and discover git repositories.
 
-    Scans up to max_depth levels deep looking for .git directories.
-    Parses remotes from each repo to determine forge type.
-    Skips nested repos (a .git inside another repo's working tree).
+    Scans up to max_depth levels deep for a ``.git`` folder, or a ``.git``
+    file that points at one, as in a linked worktree. Symlinked directories
+    are followed, even outside root, and count as one level. Each real
+    directory is walked once, so a link cycle ends and a repository reached by
+    two paths is reported once, at its resolved path. Dot-folders are not
+    scanned. Parses remotes from each repo to determine forge type.
+    Skips nested repos (a repository inside another one's working tree).
     """
     root = root.expanduser().resolve()
     if not root.is_dir():
         return []
 
+    checkouts = _find_checkouts(root, max_depth)
+    found = set(checkouts)
     repos: list[Repo] = []
-    seen_git_dirs: set[Path] = set()
 
-    for git_dir in _find_git_dirs(root, max_depth):
-        repo_path = git_dir.parent
-        if repo_path in seen_git_dirs:
+    for repo_path, worktree in checkouts.items():
+        if _is_nested_in(repo_path, found):
             continue
-
-        if _is_nested_in(repo_path, seen_git_dirs):
-            continue
-
-        seen_git_dirs.add(repo_path)
 
         remotes = _read_remotes(repo_path, extra_gitlab_hosts, extra_github_hosts)
         if not remotes:
@@ -44,48 +47,90 @@ def discover_repos(
 
         primary = _pick_primary_remote(remotes)
         repos.append(
-            Repo(path=repo_path, remotes=tuple(remotes), primary_remote=primary)
+            Repo(
+                path=repo_path,
+                remotes=tuple(remotes),
+                primary_remote=primary,
+                worktree=worktree,
+            )
         )
 
     repos.sort(key=lambda r: r.display_name.lower())
     return repos
 
 
-def _find_git_dirs(root: Path, max_depth: int) -> list[Path]:
-    """Find all .git directories under root up to max_depth."""
-    git_dirs: list[Path] = []
+def _find_checkouts(root: Path, max_depth: int) -> dict[Path, bool]:
+    """Map each checkout under root, by real path, to whether it is a worktree.
 
-    def _walk(directory: Path, depth: int) -> None:
-        if depth > max_depth:
-            return
+    The walk is breadth first, so each real directory is visited once and at
+    its shallowest depth, however many links lead to it. A checkout's own
+    working tree is not walked.
+    """
+    checkouts: dict[Path, bool] = {}
+    if max_depth < 0:
+        return checkouts
+    visited: set[Path] = {root}
+    queue: deque[tuple[Path, int]] = deque([(root, 0)])
+
+    while queue:
+        directory, depth = queue.popleft()
+        worktree = _checkout_kind(directory)
+        if worktree is not None:
+            checkouts[directory] = worktree
+            continue
+        if depth >= max_depth:
+            continue
 
         try:
             entries = sorted(directory.iterdir())
-        except PermissionError:
-            return
+        except OSError:
+            continue
 
         for entry in entries:
-            try:
-                is_dir = entry.is_dir()
-            except PermissionError:
-                continue
-            if not is_dir:
-                continue
-            if entry.is_symlink():
-                continue
-            if entry.name == ".git":
-                git_dirs.append(entry)
-                return
             if entry.name.startswith("."):
                 continue
-            _walk(entry, depth + 1)
+            try:
+                if not entry.is_dir():
+                    continue
+                # The walk starts from a resolved root and only ever moves to
+                # resolved directories, so only a link needs resolving here.
+                real = entry.resolve(strict=True) if entry.is_symlink() else entry
+            except (OSError, RuntimeError):
+                # A broken or unreadable link, or a link loop.
+                continue
+            if real in visited:
+                continue
+            visited.add(real)
+            queue.append((real, depth + 1))
 
-    _walk(root, 0)
-    return git_dirs
+    return checkouts
+
+
+def _checkout_kind(directory: Path) -> bool | None:
+    """Return whether directory is a worktree checkout, or None for no checkout.
+
+    A ``.git`` folder marks a main checkout. A ``.git`` file whose first line
+    is ``gitdir: <path>`` marks a linked worktree, or a submodule, which the
+    nested check drops. Only that first line is read; git itself resolves the
+    pointer when the remotes are read.
+    """
+    marker = directory / ".git"
+    try:
+        if marker.is_dir():
+            return False
+        if not marker.is_file():
+            return None
+        with marker.open("rb") as handle:
+            first_line = handle.readline(_GITDIR_LINE_LIMIT)
+    except OSError:
+        return None
+    if first_line.startswith(b"gitdir:") and first_line[7:].strip():
+        return True
+    return None
 
 
 def _is_nested_in(path: Path, known_repos: set[Path]) -> bool:
-    """Check if path is inside an already-discovered repo."""
+    """Check if path is inside another discovered repo, comparing real paths."""
     for parent in path.parents:
         if parent in known_repos:
             return True

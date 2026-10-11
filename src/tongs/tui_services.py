@@ -84,6 +84,31 @@ _SETTLED_OUTCOMES = frozenset({SubmissionOutcome.SUBMITTED, SubmissionOutcome.ED
 _FORGE_NAMES = {ForgeType.GITHUB: "GitHub", ForgeType.GITLAB: "GitLab"}
 
 
+def one_checkout_per_project(repositories: tuple[Repo, ...]) -> tuple[Repo, ...]:
+    """Keep one checkout of each forge project, in the order given.
+
+    A main checkout and its linked worktrees share one project, so the
+    terminal lists it once: the main checkout when there is one, otherwise the
+    first checkout by path. A repository without a remote stays as it is.
+    """
+    chosen: dict[tuple[str, str], Repo] = {}
+    for repo in repositories:
+        remote = repo.primary_remote
+        key = (
+            (remote.hostname, remote.repo_path)
+            if remote is not None
+            else ("", str(repo.path))
+        )
+        current = chosen.get(key)
+        if current is None or _checkout_rank(repo) < _checkout_rank(current):
+            chosen[key] = repo
+    return tuple(chosen.values())
+
+
+def _checkout_rank(repo: Repo) -> tuple[bool, str]:
+    return (repo.worktree, str(repo.path))
+
+
 @dataclass(frozen=True, slots=True)
 class TUIDiscoveryResult:
     """One repository refresh result suitable for publishing in the TUI."""
@@ -169,7 +194,8 @@ class TUIServiceAdapter:
         if generation != self._discovery_generation:
             return TUIDiscoveryResult(generation, self._repositories, stale=True)
 
-        repositories = self.session.local_repositories
+        # The session keeps every checkout; the terminal lists each project once.
+        repositories = one_checkout_per_project(self.session.local_repositories)
         admitted = {snapshot.ref for snapshot in snapshots}
         refs: dict[Repo, RepositoryRef] = {}
         for repo in repositories:
@@ -866,4 +892,5 @@ __all__ = [
     "TUIDraftTarget",
     "TUIRepositoryProgress",
     "TUIServiceAdapter",
+    "one_checkout_per_project",
 ]
