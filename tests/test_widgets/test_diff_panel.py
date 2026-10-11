@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.style import Style
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 
@@ -342,6 +343,37 @@ class TestGutter:
         dl = _ctx(42, 99, "text")
         gutter = renderer._gutter(dl)
         assert "* " in gutter.plain
+
+    def test_open_thread_marker_is_bold_yellow_and_resolved_is_dim(self):
+        open_thread = _make_discussion(
+            id="open", old_line=5, new_line=5, is_resolved=False
+        )
+        resolved_thread = _make_discussion(
+            id="done", old_line=6, new_line=6, is_resolved=True
+        )
+        renderer = DiffRenderer(
+            comment_lines=_build_comment_lines([open_thread, resolved_thread])
+        )
+
+        def marker_styles(line: DiffLine) -> list[Style]:
+            gutter = renderer._gutter(line)
+            marker = gutter.plain.index("*")
+            return [
+                span.style if isinstance(span.style, Style) else Style.parse(span.style)
+                for span in gutter.spans
+                if span.start <= marker < span.end
+            ]
+
+        (open_style,) = marker_styles(_ctx(5, 5, "a"))
+        (resolved_style,) = marker_styles(_ctx(6, 6, "b"))
+
+        assert open_style.color is not None
+        assert open_style.color.name == "yellow"
+        assert open_style.bold is True
+        assert not open_style.dim
+        assert resolved_style.dim is True
+        assert resolved_style.color is None
+        assert not resolved_style.bold
 
 
 # -- _is_markdown_file ---------------------------------------------------

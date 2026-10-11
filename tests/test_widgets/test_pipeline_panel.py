@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from textual.app import App, ComposeResult
 from textual.message import Message
+from textual.widgets import Input, RichLog, Static
 
 from tongs.forges.models import CIStatus, Pipeline, PipelineJob
 from tongs.widgets.pipeline_panel import (
@@ -335,3 +336,76 @@ async def test_job_log_search_is_case_insensitive() -> None:
         panel._do_search("ERROR")
 
         assert panel._search_matches == [1]
+
+
+def _log_status(panel: PipelinePanel) -> str:
+    return panel.query_one("#log-search-status", Static).render().plain
+
+
+@pytest.mark.asyncio
+async def test_n_scrolls_to_the_rendered_row_of_a_truncated_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The widget keeps only the last LOG_MAX_LINES rows, so a match's raw line
+    # index is ahead of its rendered row by the number of dropped lines.
+    monkeypatch.setattr("tongs.widgets.pipeline_panel.LOG_MAX_LINES", 200)
+    log_lines = [f"line {i:03d}" for i in range(300)]
+    log_lines[150] = "line 150 needle one"
+    log_lines[160] = "line 160 needle two"
+    app = PipelinePanelApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        panel = app.query_one(PipelinePanel)
+        panel.set_job_log(
+            "\n".join(log_lines), _job(CIStatus.FAILED), _pipeline(CIStatus.FAILED)
+        )
+        await pilot.pause()
+        log_widget = panel.query_one("#job-log-content", RichLog)
+        assert len(log_widget.lines) == 200
+
+        await pilot.press("slash")
+        for key in "needle":
+            await pilot.press(key)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.focused is panel
+        assert "Match 1/2" in _log_status(panel)
+        assert log_widget.scroll_offset.y == 50
+        assert log_widget.lines[50].text.endswith("line 150 needle one")
+
+        await pilot.press("n")
+        await pilot.pause()
+        status = _log_status(panel)
+        assert "Match 2/2" in status
+        assert "line 161" in status
+        assert log_widget.scroll_offset.y == 60
+        assert log_widget.lines[60].text.endswith("line 160 needle two")
+
+        await pilot.press("N")
+        await pilot.pause()
+        assert "Match 1/2" in _log_status(panel)
+        assert log_widget.scroll_offset.y == 50
+
+
+@pytest.mark.asyncio
+async def test_job_log_search_matches_the_text_without_ansi_codes() -> None:
+    log = "setup done\n\x1b[1;31mERR\x1b[0mOR: \x1b[33mboom\x1b[0m\n\x1b[32mok\x1b[0m"
+    app = PipelinePanelApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        panel = app.query_one(PipelinePanel)
+        panel.set_job_log(log, _job(CIStatus.FAILED), _pipeline(CIStatus.FAILED))
+        await pilot.pause()
+        await pilot.press("slash")
+        search = panel.query_one("#log-search-input", Input)
+
+        # The query spans two colour changes in the raw line.
+        search.value = "error: boom"
+        await pilot.pause()
+        assert panel._search_matches == [1]
+        assert "Match 1/1" in _log_status(panel)
+        assert "ERROR: boom" in _log_status(panel)
+
+        for escape_text in ("\x1b[", "[31m", "31m", "[0m"):
+            search.value = escape_text
+            await pilot.pause()
+            assert panel._search_matches == [], escape_text
+            assert "No matches for" in _log_status(panel)

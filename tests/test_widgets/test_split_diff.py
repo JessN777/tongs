@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 
@@ -900,3 +901,123 @@ async def test_gitlab_chmod_shows_the_mode_change_in_both_file_headers() -> None
         assert "app.py" in _file_header(app)
         assert "mode" not in _file_header(app)
         assert str(new.get_option_at_index(0).prompt) == " NEW  app.py"
+
+
+def _column_rows(column: SplitDiffColumn) -> list[str]:
+    rows: list[str] = []
+    for index in range(column.option_count):
+        prompt = column.get_option_at_index(index).prompt
+        assert isinstance(prompt, Text)
+        rows.append(prompt.plain)
+    return rows
+
+
+@pytest.mark.asyncio
+async def test_new_side_only_thread_on_a_context_line_shows_in_split_view() -> None:
+    app = _DiffApp()
+    file = _file()
+    context = file.hunks[0].lines[0]
+    # GitLab anchors a thread on an unchanged line by its new line number only.
+    discussion = Discussion(
+        "thread-context",
+        True,
+        InlineComment(
+            "comment-context",
+            User("reviewer"),
+            "Explain this constant",
+            datetime(2026, 9, 8, tzinfo=UTC),
+            "after/renamed.py",
+            None,
+            20,
+        ),
+    )
+
+    async with app.run_test(size=(160, 35)) as pilot:
+        panel = app.query_one(DiffPanel)
+        panel.set_files([file], [discussion])
+        panel.request_mode(DiffViewMode.SPLIT)
+        await pilot.pause()
+        split = app.query_one(SplitDiffView)
+        old = app.query_one("#split-old", SplitDiffColumn)
+        new = app.query_one("#split-new", SplitDiffColumn)
+
+        assert split.jump_to(20, DiffSide.NEW)
+        await pilot.pause()
+        row = new.highlighted
+        assert row is not None
+        assert new._line_map[row] is context
+        assert _column_rows(new)[row].startswith("   20 * ")
+        assert _column_rows(old)[row].startswith("   10   ")
+        assert not any("Explain this constant" in text for text in _column_rows(new))
+
+        await pilot.press("d")
+        await pilot.pause()
+        assert any("Explain this constant" in text for text in _column_rows(new))
+
+        await pilot.press("r")
+        await pilot.pause()
+        assert [event.discussion_id for event in app.replies] == [discussion.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("key", "start", "cursor_index"),
+    [("K", 11, 0), ("J", 10, 1)],
+    ids=["extend-up", "extend-down"],
+)
+async def test_extend_key_starts_a_range_when_none_is_selected(
+    key: str, start: int, cursor_index: int
+) -> None:
+    app = _DiffApp()
+    file = _file()
+    context, deleted = file.hunks[0].lines[:2]
+
+    async with app.run_test(size=(160, 30)) as pilot:
+        panel = app.query_one(DiffPanel)
+        panel.set_files([file])
+        panel.request_mode(DiffViewMode.SPLIT)
+        await pilot.pause()
+        assert app.query_one(SplitDiffView).jump_to(start, DiffSide.OLD)
+        await pilot.pause()
+        old = app.query_one("#split-old", SplitDiffColumn)
+        assert old.has_focus
+        assert panel.selection is not None
+        assert len(panel.selection.lines) == 1
+
+        await pilot.press(key)
+        await pilot.pause()
+        assert panel.selection == DiffSelection(
+            file, DiffSide.OLD, (context, deleted)[cursor_index], (context, deleted)
+        )
+
+
+@pytest.mark.asyncio
+async def test_jump_to_an_old_side_line_makes_the_old_side_active() -> None:
+    app = _DiffApp()
+    file = _file()
+    context = file.hunks[0].lines[0]
+
+    async with app.run_test(size=(160, 30)) as pilot:
+        panel = app.query_one(DiffPanel)
+        panel.set_files([file])
+        panel.request_mode(DiffViewMode.SPLIT)
+        await pilot.pause()
+        split = app.query_one(SplitDiffView)
+        assert split.jump_to(21, DiffSide.NEW)
+        await pilot.pause()
+        assert panel.selection is not None
+        assert panel.selection.side is DiffSide.NEW
+
+        # Line 10 is a context line, so both columns can anchor its row; the
+        # comment must still follow the side the jump asked for.
+        assert split.jump_to(10, DiffSide.OLD)
+        assert panel.selection == DiffSelection(file, DiffSide.OLD, context, (context,))
+        split.action_comment()
+        await pilot.pause()
+
+        assert len(app.comments) == 1
+        assert app.comments[0].line is context
+        assert app.comments[0].side is DiffSide.OLD
+        assert app.comments[0].selection == DiffSelection(
+            file, DiffSide.OLD, context, (context,)
+        )
