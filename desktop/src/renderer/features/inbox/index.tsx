@@ -129,10 +129,7 @@ export function inboxPendingSelectionFocus(key: string): string | null {
   return pendingSelectionFocus.get(key) ?? null;
 }
 
-export function inboxLoadedDepth(
-  readKey: string,
-  repository: string,
-): number {
+export function inboxLoadedDepth(readKey: string, repository: string): number {
   return loadedDepths.get(readKey)?.get(repository) ?? 0;
 }
 
@@ -799,7 +796,8 @@ export function listDiscoveredReviews(
     if (!aborted() && !stopped) onRepository?.(index, next);
   };
   const queue: (() => Promise<void>)[] = handles.map(
-    (_handle, index) => () => readRepository(index, feeds[index] as RepositoryFeed),
+    (_handle, index) => () =>
+      readRepository(index, feeds[index] as RepositoryFeed),
   );
   let active = 0;
   let drain: () => void = () => undefined;
@@ -856,8 +854,14 @@ export function listDiscoveredReviews(
       // Every repository failing usually means the service itself is down,
       // so surface the error state rather than an empty list.
       const first = failures[0];
-      if (items.length === 0 && first !== undefined && failures.length === handles.length) {
-        reject(new RendererReadError(first.code, first.message, first.retryable));
+      if (
+        items.length === 0 &&
+        first !== undefined &&
+        failures.length === handles.length
+      ) {
+        reject(
+          new RendererReadError(first.code, first.message, first.retryable),
+        );
         return;
       }
       resolve({ items, failures, feeds: Object.freeze([...feeds]) });
@@ -1196,7 +1200,9 @@ export function inboxFeedPresentation(
 }
 
 /** The CI status a row sorts by, or null while it has none. */
-export type CIOrder = { readonly shown: (item: ReviewListItemDto) => string | null };
+export type CIOrder = {
+  readonly shown: (item: ReviewListItemDto) => string | null;
+};
 
 /**
  * The CI statuses lookups have found so far, which the list sorts by until
@@ -1211,7 +1217,8 @@ function settledCIOrder(
   for (const item of items) {
     if (item.summary.ci_status !== "unknown") continue;
     const shown = ci.shown(item);
-    if (shown !== null && shown !== CI_UNAVAILABLE) order.set(item.handle, shown);
+    if (shown !== null && shown !== CI_UNAVAILABLE)
+      order.set(item.handle, shown);
   }
   return order;
 }
@@ -1303,9 +1310,9 @@ export function sortReviewItems(
           sensitivity: "base",
         });
     else
-      order = (rightSummary.updated_at || rightSummary.created_at).localeCompare(
-        leftSummary.updated_at || leftSummary.created_at,
-      );
+      order = (
+        rightSummary.updated_at || rightSummary.created_at
+      ).localeCompare(leftSummary.updated_at || leftSummary.created_at);
     return order || left.handle.localeCompare(right.handle);
   });
   return Object.freeze(sorted);

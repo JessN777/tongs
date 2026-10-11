@@ -119,22 +119,25 @@ function App(): ReactNode {
     inlineAnchors.retainFor(next);
     navigator.navigate(next);
   }, []);
-  const onDiscovery = useCallback((next: readonly RepositoryDto[]) => {
-    const reconciliation = reconcileDiscoveryRoute(navigator.route, next);
-    setRepositories(next);
-    setRepositoriesReady(true);
-    setRepositoryGeneration((current) => current + 1);
-    if (reconciliation.removed) {
-      navigation(reconciliation.route);
-      setRouteNotice(
-        "The selected repository is no longer in the local workspace. Showing All reviews. Unsaved review text and saved drafts were preserved.",
-      );
-    } else if (reconciliation.route !== navigator.route) {
-      navigation(reconciliation.route);
-    } else {
-      setRouteNotice(null);
-    }
-  }, [navigation]);
+  const onDiscovery = useCallback(
+    (next: readonly RepositoryDto[]) => {
+      const reconciliation = reconcileDiscoveryRoute(navigator.route, next);
+      setRepositories(next);
+      setRepositoriesReady(true);
+      setRepositoryGeneration((current) => current + 1);
+      if (reconciliation.removed) {
+        navigation(reconciliation.route);
+        setRouteNotice(
+          "The selected repository is no longer in the local workspace. Showing All reviews. Unsaved review text and saved drafts were preserved.",
+        );
+      } else if (reconciliation.route !== navigator.route) {
+        navigation(reconciliation.route);
+      } else {
+        setRouteNotice(null);
+      }
+    },
+    [navigation],
+  );
   const onDiscoveryError = useCallback(
     (message: string | null, retry: () => void) => {
       discoveryRetry.current = retry;

@@ -19,11 +19,7 @@ export interface QuickIntent<T> {
   readonly operationId: string;
   readonly command: T;
   readonly status:
-    | "sending"
-    | "known"
-    | "unknown"
-    | "acknowledged_unknown"
-    | "rejected";
+    "sending" | "known" | "unknown" | "acknowledged_unknown" | "rejected";
   readonly outcome: MutationOutcomeDto | ReviewActionReceiptDto | null;
   readonly message: string | null;
 }
@@ -172,7 +168,9 @@ export function adoptDisplayedRevision(
   state: ReviewWorkflowState,
 ): ReviewWorkflowState {
   if (state.draft.dirty || state.draft.pendingSave)
-    throw new ReviewWorkflowRefusal("Save or resolve local draft edits before changing revision");
+    throw new ReviewWorkflowRefusal(
+      "Save or resolve local draft edits before changing revision",
+    );
   return replace(state, {
     displayed: Object.freeze({
       ...state.displayed,
@@ -187,7 +185,9 @@ export function beginQuickIntent<T extends object>(
   command: T,
 ): ReviewWorkflowState {
   if (state.quick?.status === "sending" || state.quick?.status === "unknown")
-    throw new ReviewWorkflowRefusal("Resolve the previous uncertain action before starting another");
+    throw new ReviewWorkflowRefusal(
+      "Resolve the previous uncertain action before starting another",
+    );
   return replace(state, {
     quick: Object.freeze({
       operationId,
@@ -310,8 +310,13 @@ export function editDraft(
 ): ReviewWorkflowState {
   if (state.draft.remote && state.draft.remote.state !== "editable")
     throw new ReviewWorkflowRefusal("This draft is not editable");
-  if (state.submission.progress && state.submission.progress.outcome !== "editable")
-    throw new ReviewWorkflowRefusal("This draft is locked by its durable submission attempt");
+  if (
+    state.submission.progress &&
+    state.submission.progress.outcome !== "editable"
+  )
+    throw new ReviewWorkflowRefusal(
+      "This draft is locked by its durable submission attempt",
+    );
   return replace(state, {
     draft: Object.freeze({
       ...state.draft,
@@ -332,7 +337,9 @@ export function adoptDraft(
     state.draft.remote !== null &&
     remote.id !== state.draft.remote.id
   ) {
-    throw new ReviewWorkflowRefusal("Resolve local edits before choosing another draft");
+    throw new ReviewWorkflowRefusal(
+      "Resolve local edits before choosing another draft",
+    );
   }
   if (
     state.draft.dirty &&
@@ -378,16 +385,22 @@ export function forkDraftToCurrentRevision(
   if (!stale || !draftNeedsRevisionRecovery(state))
     throw new ReviewWorkflowRefusal("No stale draft is available to preserve");
   if (state.draft.dirty || state.draft.pendingSave || state.draft.conflict)
-    throw new ReviewWorkflowRefusal("Save or resolve the stale draft before creating a current draft");
+    throw new ReviewWorkflowRefusal(
+      "Save or resolve the stale draft before creating a current draft",
+    );
   if (
     fresh.id === stale.id ||
     fresh.review !== state.displayed.review ||
     !sameRevision(fresh.revision, state.displayed.latestObservedRevision)
   ) {
-    throw new Error("The new draft is not bound to the current review revision");
+    throw new Error(
+      "The new draft is not bound to the current review revision",
+    );
   }
   if (!sameContent(contentOf(fresh), portableDraftContent(stale)))
-    throw new Error("The new draft does not contain the approved portable content");
+    throw new Error(
+      "The new draft does not contain the approved portable content",
+    );
   const preserved = state.draft.preservedStaleDrafts.some(
     (item) => item.id === stale.id,
   )
@@ -422,14 +435,20 @@ export function portableDraftContent(
   });
 }
 
-export function beginDraftSave(state: ReviewWorkflowState): ReviewWorkflowState {
+export function beginDraftSave(
+  state: ReviewWorkflowState,
+): ReviewWorkflowState {
   const remote = state.draft.remote;
   if (!remote || !state.draft.dirty || state.draft.conflict)
     throw new ReviewWorkflowRefusal("Draft is not ready to save");
-  if (state.draft.pendingSave) throw new ReviewWorkflowRefusal("A draft save is already pending");
-  if (remote.state !== "editable") throw new ReviewWorkflowRefusal("This draft is not editable");
+  if (state.draft.pendingSave)
+    throw new ReviewWorkflowRefusal("A draft save is already pending");
+  if (remote.state !== "editable")
+    throw new ReviewWorkflowRefusal("This draft is not editable");
   if (hasEmptyDraftComment(state.draft.local))
-    throw new ReviewWorkflowRefusal("Edit or remove empty draft comments before saving");
+    throw new ReviewWorkflowRefusal(
+      "Edit or remove empty draft comments before saving",
+    );
   return replace(state, {
     draft: Object.freeze({
       ...state.draft,
@@ -447,10 +466,10 @@ export function beginDraftSave(state: ReviewWorkflowState): ReviewWorkflowState 
 export function canSaveDraft(state: ReviewWorkflowState): boolean {
   return Boolean(
     state.draft.remote?.state === "editable" &&
-      state.draft.dirty &&
-      !state.draft.pendingSave &&
-      !state.draft.conflict &&
-      !hasEmptyDraftComment(state.draft.local),
+    state.draft.dirty &&
+    !state.draft.pendingSave &&
+    !state.draft.conflict &&
+    !hasEmptyDraftComment(state.draft.local),
   );
 }
 
@@ -506,7 +525,9 @@ export function failDraftSave(state: ReviewWorkflowState): ReviewWorkflowState {
   });
 }
 
-export function chooseRemoteDraft(state: ReviewWorkflowState): ReviewWorkflowState {
+export function chooseRemoteDraft(
+  state: ReviewWorkflowState,
+): ReviewWorkflowState {
   const remote = state.draft.conflict;
   if (!remote) throw new ReviewWorkflowRefusal("No conflicting draft exists");
   const adopted = contentOf(remote);
@@ -541,7 +562,9 @@ export function dismissSupersededDraft(
     (item) => item.displacedByVersion !== displacedByVersion,
   );
   if (remaining.length === state.draft.supersededLocalDrafts.length)
-    throw new ReviewWorkflowRefusal("No superseded local draft text is retained for that version");
+    throw new ReviewWorkflowRefusal(
+      "No superseded local draft text is retained for that version",
+    );
   return replace(state, {
     draft: Object.freeze({
       ...state.draft,
@@ -550,11 +573,15 @@ export function dismissSupersededDraft(
   });
 }
 
-export function keepLocalDraft(state: ReviewWorkflowState): ReviewWorkflowState {
+export function keepLocalDraft(
+  state: ReviewWorkflowState,
+): ReviewWorkflowState {
   const remote = state.draft.conflict;
   if (!remote) throw new ReviewWorkflowRefusal("No conflicting draft exists");
   if (remote.state !== "editable")
-    throw new ReviewWorkflowRefusal("The conflicting draft is no longer editable");
+    throw new ReviewWorkflowRefusal(
+      "The conflicting draft is no longer editable",
+    );
   return replace(state, {
     draft: Object.freeze({
       ...state.draft,
@@ -572,7 +599,9 @@ export function keepLocalDraft(state: ReviewWorkflowState): ReviewWorkflowState 
  * null when it can. Evaluated on the conflicted state so a refusal leaves the
  * comparison and the take-theirs choice in place.
  */
-export function keepLocalDraftRefusal(state: ReviewWorkflowState): string | null {
+export function keepLocalDraftRefusal(
+  state: ReviewWorkflowState,
+): string | null {
   const conflict = state.draft.conflict;
   if (!conflict) return "No draft conflict is waiting to be resolved.";
   if (conflict.state === "submitted")
@@ -600,7 +629,10 @@ export function discardDraftRefusal(state: ReviewWorkflowState): string | null {
     return "A draft save is in flight. Let it settle before discarding the review.";
   if (state.submission.pending)
     return "A submission step is in flight. Let it settle before discarding the review.";
-  if (state.submission.progress && state.submission.progress.outcome !== "editable")
+  if (
+    state.submission.progress &&
+    state.submission.progress.outcome !== "editable"
+  )
     return "This review is held by its submission attempt. Reconcile the attempt before discarding it.";
   if (remote.state !== "editable")
     return "This draft is held by a submission attempt, so it cannot be discarded yet.";
@@ -688,12 +720,18 @@ export function beginSubmission(
   kind: PendingSubmission["kind"],
   resolution?: ReconciliationResolution,
 ): ReviewWorkflowState {
-  if (state.submission.pending) throw new ReviewWorkflowRefusal("Submission operation is already pending");
+  if (state.submission.pending)
+    throw new ReviewWorkflowRefusal("Submission operation is already pending");
   if (kind === "start" && !canStartSubmission(state))
-    throw new ReviewWorkflowRefusal("Save the editable draft before submitting it");
+    throw new ReviewWorkflowRefusal(
+      "Save the editable draft before submitting it",
+    );
   if (kind === "resume" && state.submission.progress?.outcome !== "paused")
     throw new ReviewWorkflowRefusal("Only paused submissions can resume");
-  if (kind === "reconcile" && !canReconcileSubmission(state.submission.progress, resolution))
+  if (
+    kind === "reconcile" &&
+    !canReconcileSubmission(state.submission.progress, resolution)
+  )
     throw new ReviewWorkflowRefusal(
       state.submission.progress?.outcome === "paused"
         ? "A paused submission can only return to editing"
@@ -765,7 +803,8 @@ export function failSubmission(
   state: ReviewWorkflowState,
   message: string,
 ): ReviewWorkflowState {
-  if (!state.submission.pending) throw new Error("No submission operation is pending");
+  if (!state.submission.pending)
+    throw new Error("No submission operation is pending");
   return replace(state, {
     submission: Object.freeze({
       ...state.submission,
@@ -785,43 +824,48 @@ export function canStartSubmission(state: ReviewWorkflowState): boolean {
   const current = state.displayed.latestObservedRevision;
   return Boolean(
     state.draft.remote?.state === "editable" &&
-      sameRevision(state.draft.remote.revision, current) &&
-      state.draft.remote.comments.every(
-        (comment) =>
-          comment.kind !== "inline" || sameRevision(comment.anchor.revision, current),
-      ) &&
-      !state.draft.dirty &&
-      !state.draft.conflict &&
-      !state.draft.pendingSave &&
-      !state.submission.pending &&
-      !state.submission.progress,
+    sameRevision(state.draft.remote.revision, current) &&
+    state.draft.remote.comments.every(
+      (comment) =>
+        comment.kind !== "inline" ||
+        sameRevision(comment.anchor.revision, current),
+    ) &&
+    !state.draft.dirty &&
+    !state.draft.conflict &&
+    !state.draft.pendingSave &&
+    !state.submission.pending &&
+    !state.submission.progress,
   );
 }
 
-export function draftNeedsRevisionRecovery(state: ReviewWorkflowState): boolean {
+export function draftNeedsRevisionRecovery(
+  state: ReviewWorkflowState,
+): boolean {
   const draft = state.draft.remote;
   return Boolean(
     draft &&
-      (!sameRevision(draft.revision, state.displayed.latestObservedRevision) ||
-        draft.comments.some(
-          (comment) => comment.kind === "inline" && comment.anchor.stale,
-        )),
+    (!sameRevision(draft.revision, state.displayed.latestObservedRevision) ||
+      draft.comments.some(
+        (comment) => comment.kind === "inline" && comment.anchor.stale,
+      )),
   );
 }
 
 export function canCaptureDraftInline(state: ReviewWorkflowState): boolean {
   return Boolean(
     state.draft.remote?.state === "editable" &&
-      sameRevision(
-        state.draft.remote.revision,
-        state.displayed.latestObservedRevision,
-      ) &&
-      !state.submission.pending &&
-      !state.submission.progress,
+    sameRevision(
+      state.draft.remote.revision,
+      state.displayed.latestObservedRevision,
+    ) &&
+    !state.submission.pending &&
+    !state.submission.progress,
   );
 }
 
-export function submissionGuidance(progress: SubmissionProgressDto): string | null {
+export function submissionGuidance(
+  progress: SubmissionProgressDto,
+): string | null {
   if (progress.outcome === "submitted") return "Review submitted.";
   if (progress.outcome === "unknown") {
     if (progress.unknown_step_ids.length > 0)
@@ -840,11 +884,15 @@ export async function captureDraftAnchor(
   current: () => DraftAnchorSelection | null,
 ): Promise<DraftInlineAnchorInputDto> {
   if (!selection.contextComplete)
-    throw new Error("The selected diff context is partial. Refresh before drafting inline feedback.");
+    throw new Error(
+      "The selected diff context is partial. Refresh before drafting inline feedback.",
+    );
   const frozen = immutableSelection(selection);
   const fingerprint = await contextFingerprint(frozen.contextLines);
   if (!sameSelection(frozen, current()))
-    throw new Error("The inline selection changed while its context was captured");
+    throw new Error(
+      "The inline selection changed while its context was captured",
+    );
   return Object.freeze({
     revision: frozen.revision,
     old_path: frozen.oldPath,
@@ -867,7 +915,11 @@ export async function contextFingerprint(
   for (const line of contextLines) {
     const encoded = encoder.encode(line);
     const length = new Uint8Array(8);
-    new DataView(length.buffer).setBigUint64(0, BigInt(encoded.byteLength), false);
+    new DataView(length.buffer).setBigUint64(
+      0,
+      BigInt(encoded.byteLength),
+      false,
+    );
     chunks.push(length, encoded);
     size += length.byteLength + encoded.byteLength;
   }
@@ -984,7 +1036,9 @@ function immutableContent(content: DraftContentInputDto): DraftContentInputDto {
   return immutableCopy(content);
 }
 
-function immutableSelection(selection: DraftAnchorSelection): DraftAnchorSelection {
+function immutableSelection(
+  selection: DraftAnchorSelection,
+): DraftAnchorSelection {
   return Object.freeze({
     ...selection,
     revision: freezeRevision(selection.revision),
@@ -997,7 +1051,8 @@ function immutableCopy<T>(value: T): T {
     return Object.freeze(value.map((item) => immutableCopy(item))) as T;
   if (value !== null && typeof value === "object") {
     const result: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value)) result[key] = immutableCopy(item);
+    for (const [key, item] of Object.entries(value))
+      result[key] = immutableCopy(item);
     return Object.freeze(result) as T;
   }
   return value;
@@ -1007,7 +1062,10 @@ function freezeRevision(revision: ReviewRevisionDto): ReviewRevisionDto {
   return Object.freeze({ ...revision });
 }
 
-function sameRevision(left: ReviewRevisionDto, right: ReviewRevisionDto): boolean {
+function sameRevision(
+  left: ReviewRevisionDto,
+  right: ReviewRevisionDto,
+): boolean {
   return (
     left.head_sha === right.head_sha &&
     left.base_sha === right.base_sha &&
@@ -1042,17 +1100,19 @@ function sameSelection(
 ): boolean {
   return Boolean(
     right &&
-      left.review === right.review &&
-      sameRevision(left.revision, right.revision) &&
-      left.oldPath === right.oldPath &&
-      left.newPath === right.newPath &&
-      left.side === right.side &&
-      left.oldLine === right.oldLine &&
-      left.newLine === right.newLine &&
-      left.startLine === right.startLine &&
-      left.startSide === right.startSide &&
-      left.contextComplete === right.contextComplete &&
-      left.contextLines.length === right.contextLines.length &&
-      left.contextLines.every((line, index) => line === right.contextLines[index]),
+    left.review === right.review &&
+    sameRevision(left.revision, right.revision) &&
+    left.oldPath === right.oldPath &&
+    left.newPath === right.newPath &&
+    left.side === right.side &&
+    left.oldLine === right.oldLine &&
+    left.newLine === right.newLine &&
+    left.startLine === right.startLine &&
+    left.startSide === right.startSide &&
+    left.contextComplete === right.contextComplete &&
+    left.contextLines.length === right.contextLines.length &&
+    left.contextLines.every(
+      (line, index) => line === right.contextLines[index],
+    ),
   );
 }

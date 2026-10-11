@@ -963,7 +963,11 @@ button {
   overflow: auto;
   padding: 10px 0;
   white-space: pre;
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
 }
 .ci-log-lines code {
   display: grid;

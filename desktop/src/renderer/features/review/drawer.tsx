@@ -437,7 +437,8 @@ export function useReviewDrawer(
       const conflicting = isConflictError(reason)
         ? await recoverDraft(bridge, review, remote.id)
         : null;
-      if (conflicting) apply((latest) => conflictDraftSave(latest, conflicting));
+      if (conflicting)
+        apply((latest) => conflictDraftSave(latest, conflicting));
       else apply(failDraftSave);
       setMessage(drawerFailureMessage(reason));
       return false;
@@ -541,7 +542,11 @@ export function useReviewDrawer(
         apply((state) => finishSubmission(state, progress));
         setRecoveries((items) => withAttempt(items, progress));
         if (progress.outcome === "editable") {
-          const editable = await recoverDraft(bridge, review, progress.draft_id);
+          const editable = await recoverDraft(
+            bridge,
+            review,
+            progress.draft_id,
+          );
           if (editable) {
             apply((state) => adoptDraft(state, editable));
             setDraftCandidates((items) => [
@@ -791,8 +796,7 @@ export function saveRefusal(state: ReviewWorkflowState): string {
   if (!draft) return "No pending review is open to save.";
   if (state.draft.conflict)
     return "This pending review was changed elsewhere. Resolve the conflict before saving it.";
-  if (state.draft.pendingSave)
-    return "A draft save is already in flight.";
+  if (state.draft.pendingSave) return "A draft save is already in flight.";
   if (draft.state !== "editable")
     return "This draft is held by a submission attempt, so it cannot be saved.";
   if (state.draft.local.comments.some((comment) => comment.body.length === 0))
@@ -907,8 +911,8 @@ function ReviewDrawer({
   const stale = draftNeedsRevisionRecovery(workflow);
   const locked = Boolean(
     workflow.submission.pending ||
-      (workflow.submission.progress &&
-        workflow.submission.progress.outcome !== "editable"),
+    (workflow.submission.progress &&
+      workflow.submission.progress.outcome !== "editable"),
   );
   // Submit saves an unsent summary or verdict on the way, so a draft that is
   // merely unsaved does not block it. A draft that cannot be saved does: the
@@ -997,9 +1001,7 @@ function ReviewDrawer({
           Close
         </button>
       </header>
-      {controller.message && (
-        <Notice kind="error">{controller.message}</Notice>
-      )}
+      {controller.message && <Notice kind="error">{controller.message}</Notice>}
       {!draft && (
         <Notice kind="empty">
           No pending review is open. Start one from a diff line, or choose a
@@ -1052,8 +1054,7 @@ function ReviewDrawer({
               controller.dismissSuperseded(superseded.displacedByVersion)
             }
           >
-            Dismiss my text replaced by version{" "}
-            {superseded.displacedByVersion}
+            Dismiss my text replaced by version {superseded.displacedByVersion}
           </button>
         </Notice>
       ))}
@@ -1090,7 +1091,9 @@ function ReviewDrawer({
               title={saveReason ?? undefined}
               onClick={() => void controller.save()}
             >
-              {workflow.draft.pendingSave ? "Saving…" : "Save summary and verdict"}
+              {workflow.draft.pendingSave
+                ? "Saving…"
+                : "Save summary and verdict"}
             </button>
             {saveReason !== null && (
               <p role="status" className="review-drawer-confirm">
@@ -1334,9 +1337,9 @@ function DrawerEntryRow({
       {stale && entry.anchor && (
         <p className="review-drawer-entry-ribbon" role="status">
           {staleRibbonText(entry.anchor)}. It is listed here by the line it was
-          stored against, and offers no jump, because no row of the current
-          diff is known to be that line. Its text can still be edited here, and
-          its anchor is never retargeted.
+          stored against, and offers no jump, because no row of the current diff
+          is known to be that line. Its text can still be edited here, and its
+          anchor is never retargeted.
         </p>
       )}
       {draftBody === null ? (
@@ -1437,7 +1440,11 @@ function VerdictTiles({
   return (
     <section className="review-drawer-verdict" aria-label="Verdict">
       <h3 className="review-drawer-verdict-title">Verdict</h3>
-      <div className="review-drawer-verdict-tiles" role="radiogroup" aria-label="Verdict">
+      <div
+        className="review-drawer-verdict-tiles"
+        role="radiogroup"
+        aria-label="Verdict"
+      >
         {allowed.map((tile) => (
           <label key={tile.value} className="review-drawer-verdict-tile">
             <input
@@ -1643,7 +1650,9 @@ function SubmissionProgress({
           </li>
         ))}
       </ol>
-      {progress.failure && <Notice kind="error">{progress.failure.message}</Notice>}
+      {progress.failure && (
+        <Notice kind="error">{progress.failure.message}</Notice>
+      )}
       {progress.outcome === "paused" && (
         <>
           <p>
@@ -1757,7 +1766,9 @@ function withAttempt(
   items: readonly SubmissionProgressDto[],
   progress: SubmissionProgressDto,
 ): readonly SubmissionProgressDto[] {
-  const others = items.filter((item) => item.attempt_id !== progress.attempt_id);
+  const others = items.filter(
+    (item) => item.attempt_id !== progress.attempt_id,
+  );
   if (progress.outcome === "editable" || progress.outcome === "submitted")
     return others;
   return [progress, ...others];

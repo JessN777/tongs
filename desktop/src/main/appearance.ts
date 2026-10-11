@@ -25,7 +25,8 @@ export const WINDOW_BACKGROUND = Object.freeze({
   dark: "#0c1119",
   light: "#f6f8fa",
 } as const);
-export const COLOR_SCHEME_SAVE_FAILURE = "The colour scheme could not be saved.";
+export const COLOR_SCHEME_SAVE_FAILURE =
+  "The colour scheme could not be saved.";
 
 /** The part of Electron's `nativeTheme` the appearance drives. */
 export interface NativeThemeTarget {
@@ -242,6 +243,7 @@ export class AppearanceController {
 
   #apply(): void {
     const effective = this.#saved ?? this.#configured;
-    if (this.theme.themeSource !== effective) this.theme.themeSource = effective;
+    if (this.theme.themeSource !== effective)
+      this.theme.themeSource = effective;
   }
 }

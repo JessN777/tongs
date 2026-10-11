@@ -1,13 +1,44 @@
-const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
+const { contextBridge, ipcRenderer } =
+  require("electron") as typeof import("electron");
 import type {
-  AcceptedResult, AppearanceDto, AssetDescriptor, ColorScheme, CommitsResult, DesktopBridge, DesktopEvent,
-  DesktopRead, DiffContextParams, DiffContextResult, DiffPage, DiffWireRow, DiscussionsPage,
-  GenerateDiffParams, GenerateDiffResult, InvokePluginParams, JobsResult,
-  JsonValue, ListPipelinesParams, ListReviewPipelinesParams, ListReviewsParams,
-  LocationParams, LogPage, ServiceStatusDto, OpenDiffParams, OpenLogParams, OpenRepositoryParams,
-  PageParams, PipelinesResult, PluginResult, PluginsResult,
-  RepositoryDto, RepositoryListResult, ReviewCIStatusParams, ReviewCIStatusResult,
-  ReviewListResult, ReviewSnapshotDto, ServiceErrorDto,
+  AcceptedResult,
+  AppearanceDto,
+  AssetDescriptor,
+  ColorScheme,
+  CommitsResult,
+  DesktopBridge,
+  DesktopEvent,
+  DesktopRead,
+  DiffContextParams,
+  DiffContextResult,
+  DiffPage,
+  DiffWireRow,
+  DiscussionsPage,
+  GenerateDiffParams,
+  GenerateDiffResult,
+  InvokePluginParams,
+  JobsResult,
+  JsonValue,
+  ListPipelinesParams,
+  ListReviewPipelinesParams,
+  ListReviewsParams,
+  LocationParams,
+  LogPage,
+  ServiceStatusDto,
+  OpenDiffParams,
+  OpenLogParams,
+  OpenRepositoryParams,
+  PageParams,
+  PipelinesResult,
+  PluginResult,
+  PluginsResult,
+  RepositoryDto,
+  RepositoryListResult,
+  ReviewCIStatusParams,
+  ReviewCIStatusResult,
+  ReviewListResult,
+  ReviewSnapshotDto,
+  ServiceErrorDto,
 } from "../shared/bridge.js";
 import type {
   CICapabilitiesResult,
@@ -53,14 +84,34 @@ import type {
 } from "../shared/utilities.js";
 
 const IPC_CHANNELS = Object.freeze({
-  discoverRepositories: "tongs:repositories.discover", openRepository: "tongs:repositories.open", listReviews: "tongs:reviews.list", getReview: "tongs:reviews.get",
+  discoverRepositories: "tongs:repositories.discover",
+  openRepository: "tongs:repositories.open",
+  listReviews: "tongs:reviews.list",
+  getReview: "tongs:reviews.get",
   getReviewCIStatus: "tongs:reviews.ci-status",
-  openDiff: "tongs:diff.open", pageDiff: "tongs:diff.page", getDiffContext: "tongs:diff.context", generateDiff: "tongs:diff.generate", listDiscussions: "tongs:discussions.list", pageDiscussions: "tongs:discussions.page", listCommits: "tongs:commits.list",
-  listPipelines: "tongs:pipelines.list", listReviewPipelines: "tongs:review-pipelines.list", listJobs: "tongs:jobs.list", openLog: "tongs:logs.open", pageLog: "tongs:logs.page",
-  listPlugins: "tongs:plugins.list", invokePlugin: "tongs:plugins.invoke", setLocation: "tongs:host.set-location", listAssets: "tongs:assets.list",
-  cancelRead: "tongs:read.cancel", openExternal: "tongs:external.open", event: "tongs:event",
-  serviceStatus: "tongs:service.status", getServiceStatus: "tongs:service.status.get",
-  appearance: "tongs:appearance", getAppearance: "tongs:appearance.get",
+  openDiff: "tongs:diff.open",
+  pageDiff: "tongs:diff.page",
+  getDiffContext: "tongs:diff.context",
+  generateDiff: "tongs:diff.generate",
+  listDiscussions: "tongs:discussions.list",
+  pageDiscussions: "tongs:discussions.page",
+  listCommits: "tongs:commits.list",
+  listPipelines: "tongs:pipelines.list",
+  listReviewPipelines: "tongs:review-pipelines.list",
+  listJobs: "tongs:jobs.list",
+  openLog: "tongs:logs.open",
+  pageLog: "tongs:logs.page",
+  listPlugins: "tongs:plugins.list",
+  invokePlugin: "tongs:plugins.invoke",
+  setLocation: "tongs:host.set-location",
+  listAssets: "tongs:assets.list",
+  cancelRead: "tongs:read.cancel",
+  openExternal: "tongs:external.open",
+  event: "tongs:event",
+  serviceStatus: "tongs:service.status",
+  getServiceStatus: "tongs:service.status.get",
+  appearance: "tongs:appearance",
+  getAppearance: "tongs:appearance.get",
   setColorScheme: "tongs:appearance.set-color-scheme",
 } as const);
 const CI_IPC_CHANNELS = Object.freeze({
@@ -111,27 +162,49 @@ const READ_FAILURE_MARKER = "tongs-read-failure:";
 const READ_FAILURE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_READ_FAILURE_DETAIL = 240;
 const INVALID_READ_RESPONSE: ServiceErrorDto = Object.freeze({
-  code: "invalid_response", message: "The desktop read returned an invalid response.", retryable: false,
+  code: "invalid_response",
+  message: "The desktop read returned an invalid response.",
+  retryable: false,
 });
-function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value) &&
-    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+function hasExactKeys(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
+  );
 }
 function readFailure(failure: ServiceErrorDto): Error {
-  const encoded = encodeURIComponent(JSON.stringify({ code: failure.code, message: failure.message, retryable: failure.retryable }));
+  const encoded = encodeURIComponent(
+    JSON.stringify({
+      code: failure.code,
+      message: failure.message,
+      retryable: failure.retryable,
+    }),
+  );
   return new Error(`${READ_FAILURE_MARKER}${encoded} ${failure.message}`);
 }
 function settledRead<T>(value: unknown): T {
-  if (!hasExactKeys(value, ["result", "error"])) throw readFailure(INVALID_READ_RESPONSE);
+  if (!hasExactKeys(value, ["result", "error"]))
+    throw readFailure(INVALID_READ_RESPONSE);
   const { result, error } = value;
   if (error === null) return result as T;
-  if (result !== null || !hasExactKeys(error, ["code", "message", "retryable"])) throw readFailure(INVALID_READ_RESPONSE);
+  if (result !== null || !hasExactKeys(error, ["code", "message", "retryable"]))
+    throw readFailure(INVALID_READ_RESPONSE);
   const { code, message, retryable } = error;
   if (
-    typeof code !== "string" || !READ_FAILURE_CODE.test(code) ||
-    typeof message !== "string" || message.length === 0 || message.length > MAX_READ_FAILURE_DETAIL ||
+    typeof code !== "string" ||
+    !READ_FAILURE_CODE.test(code) ||
+    typeof message !== "string" ||
+    message.length === 0 ||
+    message.length > MAX_READ_FAILURE_DETAIL ||
     typeof retryable !== "boolean"
-  ) throw readFailure(INVALID_READ_RESPONSE);
+  )
+    throw readFailure(INVALID_READ_RESPONSE);
   throw readFailure({ code, message, retryable });
 }
 
@@ -139,14 +212,20 @@ const owned = new Set<string>();
 function read<T>(channel: string, params: object): DesktopRead<T> {
   const requestToken = crypto.randomUUID();
   owned.add(requestToken);
-  const result = ipcRenderer.invoke(channel, { requestToken, params }).then((value: unknown) => settledRead<T>(value)).finally(() => owned.delete(requestToken));
+  const result = ipcRenderer
+    .invoke(channel, { requestToken, params })
+    .then((value: unknown) => settledRead<T>(value))
+    .finally(() => owned.delete(requestToken));
   return Object.freeze({ requestToken, result });
 }
 async function mutate(
   channel: string,
   params: PipelineMutationParams | JobMutationParams,
 ): Promise<CIMutationReceipt> {
-  const value = (await ipcRenderer.invoke(channel, params)) as CIMutationIPCResult;
+  const value = (await ipcRenderer.invoke(
+    channel,
+    params,
+  )) as CIMutationIPCResult;
   if (value.error !== null) throw value.error;
   return value.receipt;
 }
@@ -159,77 +238,200 @@ async function mutateReview<T>(channel: string, params: object): Promise<T> {
   return value.result;
 }
 const bridge: DesktopBridge = Object.freeze({
-  discoverRepositories: (): DesktopRead<RepositoryListResult> => read(IPC_CHANNELS.discoverRepositories, {}),
-  openRepository: (params: OpenRepositoryParams): DesktopRead<RepositoryDto> => read(IPC_CHANNELS.openRepository, params),
-  listReviews: (params: ListReviewsParams): DesktopRead<ReviewListResult> => read(IPC_CHANNELS.listReviews, params),
-  getReview: (review: string): DesktopRead<ReviewSnapshotDto> => read(IPC_CHANNELS.getReview, { review }),
-  getReviewCIStatus: (params: ReviewCIStatusParams): DesktopRead<ReviewCIStatusResult> => read(IPC_CHANNELS.getReviewCIStatus, params),
-  openDiff: (params: OpenDiffParams): DesktopRead<DiffPage> => read(IPC_CHANNELS.openDiff, params),
-  pageDiff: <T extends DiffWireRow>(params: PageParams): DesktopRead<DiffPage<T>> => read(IPC_CHANNELS.pageDiff, params),
-  getDiffContext: (params: DiffContextParams): DesktopRead<DiffContextResult> => read(IPC_CHANNELS.getDiffContext, params),
-  generateDiff: (params: GenerateDiffParams): DesktopRead<GenerateDiffResult> => read(IPC_CHANNELS.generateDiff, params),
-  listDiscussions: (review: string): DesktopRead<DiscussionsPage> => read(IPC_CHANNELS.listDiscussions, { review }),
-  pageDiscussions: (params: PageParams): DesktopRead<DiscussionsPage> => read(IPC_CHANNELS.pageDiscussions, params),
-  listCommits: (review: string): DesktopRead<CommitsResult> => read(IPC_CHANNELS.listCommits, { review }),
-  listPipelines: (params: ListPipelinesParams): DesktopRead<PipelinesResult> => read(IPC_CHANNELS.listPipelines, params),
-  listReviewPipelines: (params: ListReviewPipelinesParams): DesktopRead<PipelinesResult> => read(IPC_CHANNELS.listReviewPipelines, params),
-  listJobs: (pipeline: string): DesktopRead<JobsResult> => read(IPC_CHANNELS.listJobs, { pipeline }),
-  openLog: (params: OpenLogParams): DesktopRead<LogPage> => read(IPC_CHANNELS.openLog, params),
-  pageLog: (params: PageParams): DesktopRead<LogPage> => read(IPC_CHANNELS.pageLog, params),
-  getCICapabilities: (repository: string): DesktopRead<CICapabilitiesResult> => read(CI_IPC_CHANNELS.capabilities, { repository }),
-  retryPipeline: (params: PipelineMutationParams): Promise<CIMutationReceipt> => mutate(CI_IPC_CHANNELS.retryPipeline, params),
-  cancelPipeline: (params: PipelineMutationParams): Promise<CIMutationReceipt> => mutate(CI_IPC_CHANNELS.cancelPipeline, params),
-  retryJob: (params: JobMutationParams): Promise<CIMutationReceipt> => mutate(CI_IPC_CHANNELS.retryJob, params),
-  cancelJob: (params: JobMutationParams): Promise<CIMutationReceipt> => mutate(CI_IPC_CHANNELS.cancelJob, params),
-  getCIReceipt: (params: CIReceiptParams): DesktopRead<CIReceiptResult> => read(CI_IPC_CHANNELS.receipt, params),
-  getReviewMutationCapabilities: (review: string): DesktopRead<ReviewCapabilitiesResult<ReviewMutationCapabilitiesDto>> => read(REVIEW_IPC_CHANNELS.mutationCapabilities, { review }),
-  postReviewComment: (params: GeneralCommentParams): Promise<MutationOutcomeDto> => mutateReview(REVIEW_IPC_CHANNELS.comment, params),
-  postInlineReviewComment: (params: InlineCommentParams): Promise<MutationOutcomeDto> => mutateReview(REVIEW_IPC_CHANNELS.inlineComment, params),
-  replyReviewDiscussion: (params: ReplyParams): Promise<MutationOutcomeDto> => mutateReview(REVIEW_IPC_CHANNELS.reply, params),
-  resolveReviewDiscussion: (params: ResolveParams): Promise<MutationOutcomeDto> => mutateReview(REVIEW_IPC_CHANNELS.resolve, params),
-  submitReviewVerdict: (params: VerdictParams): Promise<MutationOutcomeDto> => mutateReview(REVIEW_IPC_CHANNELS.verdict, params),
-  getReviewActionCapabilities: (review: string): DesktopRead<ReviewCapabilitiesResult<ReviewActionCapabilitiesDto>> => read(REVIEW_IPC_CHANNELS.actionCapabilities, { review }),
-  mergeReview: (params: MergeParams): Promise<ReviewActionReceiptDto> => mutateReview(REVIEW_IPC_CHANNELS.merge, params),
-  closeReview: (params: RevisionOperationParams): Promise<ReviewActionReceiptDto> => mutateReview(REVIEW_IPC_CHANNELS.close, params),
-  reopenReview: (params: RevisionOperationParams): Promise<ReviewActionReceiptDto> => mutateReview(REVIEW_IPC_CHANNELS.reopen, params),
-  unapproveReview: (params: RevisionOperationParams): Promise<ReviewActionReceiptDto> => mutateReview(REVIEW_IPC_CHANNELS.unapprove, params),
-  getReviewActionReceipt: (params: ActionReceiptParams): DesktopRead<{ readonly receipt: ReviewActionReceiptDto | null }> => read(REVIEW_IPC_CHANNELS.actionReceipt, params),
-  createReviewDraft: (params: CreateDraftParams): Promise<DraftSnapshotDto> => mutateReview(REVIEW_IPC_CHANNELS.createDraft, params),
-  getReviewDraft: (params: { readonly review: string; readonly draft_id: string }): DesktopRead<DraftSnapshotDto> => read(REVIEW_IPC_CHANNELS.getDraft, params),
-  listReviewDrafts: (params: ListDraftsParams): DesktopRead<DraftListResult> => read(REVIEW_IPC_CHANNELS.listDrafts, params),
-  saveReviewDraft: (params: SaveDraftParams): Promise<DraftSnapshotDto> => mutateReview(REVIEW_IPC_CHANNELS.saveDraft, params),
-  discardReviewDraft: (params: DiscardDraftParams): Promise<{ readonly discarded: DraftSnapshotDto }> => mutateReview(REVIEW_IPC_CHANNELS.discardDraft, params),
-  startReviewSubmission: (params: StartSubmissionParams): Promise<SubmissionProgressDto> => mutateReview(REVIEW_IPC_CHANNELS.startSubmission, params),
-  getReviewSubmission: (params: AttemptParams): DesktopRead<SubmissionProgressDto> => read(REVIEW_IPC_CHANNELS.getSubmission, params),
-  listReviewSubmissions: (params: ListSubmissionsParams): DesktopRead<SubmissionListResult> => read(REVIEW_IPC_CHANNELS.listSubmissions, params),
-  resumeReviewSubmission: (params: AttemptParams): Promise<SubmissionProgressDto> => mutateReview(REVIEW_IPC_CHANNELS.resumeSubmission, params),
-  reconcileReviewSubmission: (params: ReconcileSubmissionParams): Promise<SubmissionProgressDto> => mutateReview(REVIEW_IPC_CHANNELS.reconcileSubmission, params),
-  listPlugins: (): DesktopRead<PluginsResult> => read(IPC_CHANNELS.listPlugins, {}),
-  invokePlugin: (params: InvokePluginParams): DesktopRead<PluginResult> => read(IPC_CHANNELS.invokePlugin, params),
-  setLocation: async (params: LocationParams): Promise<AcceptedResult> => ipcRenderer.invoke(IPC_CHANNELS.setLocation, params) as Promise<AcceptedResult>,
-  listAssets: (): DesktopRead<readonly AssetDescriptor[]> => read(IPC_CHANNELS.listAssets, {}),
-  cancelRead: async (token: string): Promise<boolean> => owned.has(token) && await ipcRenderer.invoke(IPC_CHANNELS.cancelRead, token) === true,
+  discoverRepositories: (): DesktopRead<RepositoryListResult> =>
+    read(IPC_CHANNELS.discoverRepositories, {}),
+  openRepository: (params: OpenRepositoryParams): DesktopRead<RepositoryDto> =>
+    read(IPC_CHANNELS.openRepository, params),
+  listReviews: (params: ListReviewsParams): DesktopRead<ReviewListResult> =>
+    read(IPC_CHANNELS.listReviews, params),
+  getReview: (review: string): DesktopRead<ReviewSnapshotDto> =>
+    read(IPC_CHANNELS.getReview, { review }),
+  getReviewCIStatus: (
+    params: ReviewCIStatusParams,
+  ): DesktopRead<ReviewCIStatusResult> =>
+    read(IPC_CHANNELS.getReviewCIStatus, params),
+  openDiff: (params: OpenDiffParams): DesktopRead<DiffPage> =>
+    read(IPC_CHANNELS.openDiff, params),
+  pageDiff: <T extends DiffWireRow>(
+    params: PageParams,
+  ): DesktopRead<DiffPage<T>> => read(IPC_CHANNELS.pageDiff, params),
+  getDiffContext: (params: DiffContextParams): DesktopRead<DiffContextResult> =>
+    read(IPC_CHANNELS.getDiffContext, params),
+  generateDiff: (params: GenerateDiffParams): DesktopRead<GenerateDiffResult> =>
+    read(IPC_CHANNELS.generateDiff, params),
+  listDiscussions: (review: string): DesktopRead<DiscussionsPage> =>
+    read(IPC_CHANNELS.listDiscussions, { review }),
+  pageDiscussions: (params: PageParams): DesktopRead<DiscussionsPage> =>
+    read(IPC_CHANNELS.pageDiscussions, params),
+  listCommits: (review: string): DesktopRead<CommitsResult> =>
+    read(IPC_CHANNELS.listCommits, { review }),
+  listPipelines: (params: ListPipelinesParams): DesktopRead<PipelinesResult> =>
+    read(IPC_CHANNELS.listPipelines, params),
+  listReviewPipelines: (
+    params: ListReviewPipelinesParams,
+  ): DesktopRead<PipelinesResult> =>
+    read(IPC_CHANNELS.listReviewPipelines, params),
+  listJobs: (pipeline: string): DesktopRead<JobsResult> =>
+    read(IPC_CHANNELS.listJobs, { pipeline }),
+  openLog: (params: OpenLogParams): DesktopRead<LogPage> =>
+    read(IPC_CHANNELS.openLog, params),
+  pageLog: (params: PageParams): DesktopRead<LogPage> =>
+    read(IPC_CHANNELS.pageLog, params),
+  getCICapabilities: (repository: string): DesktopRead<CICapabilitiesResult> =>
+    read(CI_IPC_CHANNELS.capabilities, { repository }),
+  retryPipeline: (params: PipelineMutationParams): Promise<CIMutationReceipt> =>
+    mutate(CI_IPC_CHANNELS.retryPipeline, params),
+  cancelPipeline: (
+    params: PipelineMutationParams,
+  ): Promise<CIMutationReceipt> =>
+    mutate(CI_IPC_CHANNELS.cancelPipeline, params),
+  retryJob: (params: JobMutationParams): Promise<CIMutationReceipt> =>
+    mutate(CI_IPC_CHANNELS.retryJob, params),
+  cancelJob: (params: JobMutationParams): Promise<CIMutationReceipt> =>
+    mutate(CI_IPC_CHANNELS.cancelJob, params),
+  getCIReceipt: (params: CIReceiptParams): DesktopRead<CIReceiptResult> =>
+    read(CI_IPC_CHANNELS.receipt, params),
+  getReviewMutationCapabilities: (
+    review: string,
+  ): DesktopRead<ReviewCapabilitiesResult<ReviewMutationCapabilitiesDto>> =>
+    read(REVIEW_IPC_CHANNELS.mutationCapabilities, { review }),
+  postReviewComment: (
+    params: GeneralCommentParams,
+  ): Promise<MutationOutcomeDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.comment, params),
+  postInlineReviewComment: (
+    params: InlineCommentParams,
+  ): Promise<MutationOutcomeDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.inlineComment, params),
+  replyReviewDiscussion: (params: ReplyParams): Promise<MutationOutcomeDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.reply, params),
+  resolveReviewDiscussion: (
+    params: ResolveParams,
+  ): Promise<MutationOutcomeDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.resolve, params),
+  submitReviewVerdict: (params: VerdictParams): Promise<MutationOutcomeDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.verdict, params),
+  getReviewActionCapabilities: (
+    review: string,
+  ): DesktopRead<ReviewCapabilitiesResult<ReviewActionCapabilitiesDto>> =>
+    read(REVIEW_IPC_CHANNELS.actionCapabilities, { review }),
+  mergeReview: (params: MergeParams): Promise<ReviewActionReceiptDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.merge, params),
+  closeReview: (
+    params: RevisionOperationParams,
+  ): Promise<ReviewActionReceiptDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.close, params),
+  reopenReview: (
+    params: RevisionOperationParams,
+  ): Promise<ReviewActionReceiptDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.reopen, params),
+  unapproveReview: (
+    params: RevisionOperationParams,
+  ): Promise<ReviewActionReceiptDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.unapprove, params),
+  getReviewActionReceipt: (
+    params: ActionReceiptParams,
+  ): DesktopRead<{ readonly receipt: ReviewActionReceiptDto | null }> =>
+    read(REVIEW_IPC_CHANNELS.actionReceipt, params),
+  createReviewDraft: (params: CreateDraftParams): Promise<DraftSnapshotDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.createDraft, params),
+  getReviewDraft: (params: {
+    readonly review: string;
+    readonly draft_id: string;
+  }): DesktopRead<DraftSnapshotDto> =>
+    read(REVIEW_IPC_CHANNELS.getDraft, params),
+  listReviewDrafts: (params: ListDraftsParams): DesktopRead<DraftListResult> =>
+    read(REVIEW_IPC_CHANNELS.listDrafts, params),
+  saveReviewDraft: (params: SaveDraftParams): Promise<DraftSnapshotDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.saveDraft, params),
+  discardReviewDraft: (
+    params: DiscardDraftParams,
+  ): Promise<{ readonly discarded: DraftSnapshotDto }> =>
+    mutateReview(REVIEW_IPC_CHANNELS.discardDraft, params),
+  startReviewSubmission: (
+    params: StartSubmissionParams,
+  ): Promise<SubmissionProgressDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.startSubmission, params),
+  getReviewSubmission: (
+    params: AttemptParams,
+  ): DesktopRead<SubmissionProgressDto> =>
+    read(REVIEW_IPC_CHANNELS.getSubmission, params),
+  listReviewSubmissions: (
+    params: ListSubmissionsParams,
+  ): DesktopRead<SubmissionListResult> =>
+    read(REVIEW_IPC_CHANNELS.listSubmissions, params),
+  resumeReviewSubmission: (
+    params: AttemptParams,
+  ): Promise<SubmissionProgressDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.resumeSubmission, params),
+  reconcileReviewSubmission: (
+    params: ReconcileSubmissionParams,
+  ): Promise<SubmissionProgressDto> =>
+    mutateReview(REVIEW_IPC_CHANNELS.reconcileSubmission, params),
+  listPlugins: (): DesktopRead<PluginsResult> =>
+    read(IPC_CHANNELS.listPlugins, {}),
+  invokePlugin: (params: InvokePluginParams): DesktopRead<PluginResult> =>
+    read(IPC_CHANNELS.invokePlugin, params),
+  setLocation: async (params: LocationParams): Promise<AcceptedResult> =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.setLocation,
+      params,
+    ) as Promise<AcceptedResult>,
+  listAssets: (): DesktopRead<readonly AssetDescriptor[]> =>
+    read(IPC_CHANNELS.listAssets, {}),
+  cancelRead: async (token: string): Promise<boolean> =>
+    owned.has(token) &&
+    (await ipcRenderer.invoke(IPC_CHANNELS.cancelRead, token)) === true,
   onEvent: (listener: (event: DesktopEvent) => void): (() => void) => {
-    const wrapped = (_event: unknown, value: JsonValue): void => listener(value as unknown as DesktopEvent);
+    const wrapped = (_event: unknown, value: JsonValue): void =>
+      listener(value as unknown as DesktopEvent);
     ipcRenderer.on(IPC_CHANNELS.event, wrapped);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.event, wrapped);
   },
-  getServiceStatus: async (): Promise<ServiceStatusDto> => ipcRenderer.invoke(IPC_CHANNELS.getServiceStatus) as Promise<ServiceStatusDto>,
-  onServiceStatus: (listener: (status: ServiceStatusDto) => void): (() => void) => {
-    const wrapped = (_event: unknown, value: JsonValue): void => listener(value as unknown as ServiceStatusDto);
+  getServiceStatus: async (): Promise<ServiceStatusDto> =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.getServiceStatus,
+    ) as Promise<ServiceStatusDto>,
+  onServiceStatus: (
+    listener: (status: ServiceStatusDto) => void,
+  ): (() => void) => {
+    const wrapped = (_event: unknown, value: JsonValue): void =>
+      listener(value as unknown as ServiceStatusDto);
     ipcRenderer.on(IPC_CHANNELS.serviceStatus, wrapped);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.serviceStatus, wrapped);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.serviceStatus, wrapped);
   },
-  openExternal: async (url: string): Promise<boolean> => await ipcRenderer.invoke(IPC_CHANNELS.openExternal, url) === true,
-  getAppearance: async (): Promise<AppearanceDto> => ipcRenderer.invoke(IPC_CHANNELS.getAppearance) as Promise<AppearanceDto>,
-  setColorScheme: async (choice: ColorScheme): Promise<AppearanceDto> => ipcRenderer.invoke(IPC_CHANNELS.setColorScheme, choice) as Promise<AppearanceDto>,
-  onAppearance: (listener: (appearance: AppearanceDto) => void): (() => void) => {
-    const wrapped = (_event: unknown, value: JsonValue): void => listener(value as unknown as AppearanceDto);
+  openExternal: async (url: string): Promise<boolean> =>
+    (await ipcRenderer.invoke(IPC_CHANNELS.openExternal, url)) === true,
+  getAppearance: async (): Promise<AppearanceDto> =>
+    ipcRenderer.invoke(IPC_CHANNELS.getAppearance) as Promise<AppearanceDto>,
+  setColorScheme: async (choice: ColorScheme): Promise<AppearanceDto> =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.setColorScheme,
+      choice,
+    ) as Promise<AppearanceDto>,
+  onAppearance: (
+    listener: (appearance: AppearanceDto) => void,
+  ): (() => void) => {
+    const wrapped = (_event: unknown, value: JsonValue): void =>
+      listener(value as unknown as AppearanceDto);
     ipcRenderer.on(IPC_CHANNELS.appearance, wrapped);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.appearance, wrapped);
   },
-  copyReviewUrl: async (review: string): Promise<CopyReviewUrlResult> => ipcRenderer.invoke(UTILITY_IPC_CHANNELS.copyReviewUrl, review) as Promise<CopyReviewUrlResult>,
-  clearCache: async (): Promise<ClearCacheResult> => ipcRenderer.invoke(UTILITY_IPC_CHANNELS.clearCache, {}) as Promise<ClearCacheResult>,
-  openJobLogInEditor: async (job: string): Promise<OpenJobLogEditorResult> => ipcRenderer.invoke(UTILITY_IPC_CHANNELS.openJobLogInEditor, job) as Promise<OpenJobLogEditorResult>,
+  copyReviewUrl: async (review: string): Promise<CopyReviewUrlResult> =>
+    ipcRenderer.invoke(
+      UTILITY_IPC_CHANNELS.copyReviewUrl,
+      review,
+    ) as Promise<CopyReviewUrlResult>,
+  clearCache: async (): Promise<ClearCacheResult> =>
+    ipcRenderer.invoke(
+      UTILITY_IPC_CHANNELS.clearCache,
+      {},
+    ) as Promise<ClearCacheResult>,
+  openJobLogInEditor: async (job: string): Promise<OpenJobLogEditorResult> =>
+    ipcRenderer.invoke(
+      UTILITY_IPC_CHANNELS.openJobLogInEditor,
+      job,
+    ) as Promise<OpenJobLogEditorResult>,
 });
 contextBridge.exposeInMainWorld("tongs", bridge);

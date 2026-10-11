@@ -313,7 +313,9 @@ function withinLimits(rows: readonly DiffRow[]): boolean {
   const count = (content: string): boolean => {
     lines += 1;
     characters += content.length;
-    return lines <= MAX_HIGHLIGHT_LINES && characters <= MAX_HIGHLIGHT_CHARACTERS;
+    return (
+      lines <= MAX_HIGHLIGHT_LINES && characters <= MAX_HIGHLIGHT_CHARACTERS
+    );
   };
   for (const row of rows) {
     if (row.kind === "line") {

@@ -25,7 +25,10 @@ interface Props {
    * with the retry that runs discovery again. It reports null when there is no
    * such failure, including while a retry is running.
    */
-  readonly onDiscoveryError?: (message: string | null, retry: () => void) => void;
+  readonly onDiscoveryError?: (
+    message: string | null,
+    retry: () => void,
+  ) => void;
   readonly pluginNavigation?: ReactNode;
 }
 
@@ -165,7 +168,8 @@ export function RepositoryNavigation({
         </label>
       </div>
       <p className="repository-count" aria-live="polite">
-        Showing {visibleRepositories.length} of {repositories.length} repositories
+        Showing {visibleRepositories.length} of {repositories.length}{" "}
+        repositories
       </p>
       <button
         className={`nav-item ${selected === null ? "nav-item-active" : ""}`}

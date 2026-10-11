@@ -29,13 +29,25 @@ export interface ReviewOperation {
 }
 
 export const REVIEW_OPERATIONS: readonly ReviewOperation[] = Object.freeze([
-  operation(REVIEW_IPC_CHANNELS.mutationCapabilities, "review_mutations.capabilities", false),
+  operation(
+    REVIEW_IPC_CHANNELS.mutationCapabilities,
+    "review_mutations.capabilities",
+    false,
+  ),
   operation(REVIEW_IPC_CHANNELS.comment, "review_mutations.comment", true),
-  operation(REVIEW_IPC_CHANNELS.inlineComment, "review_mutations.inline_comment", true),
+  operation(
+    REVIEW_IPC_CHANNELS.inlineComment,
+    "review_mutations.inline_comment",
+    true,
+  ),
   operation(REVIEW_IPC_CHANNELS.reply, "review_mutations.reply", true),
   operation(REVIEW_IPC_CHANNELS.resolve, "review_mutations.resolve", true),
   operation(REVIEW_IPC_CHANNELS.verdict, "review_mutations.verdict", true),
-  operation(REVIEW_IPC_CHANNELS.actionCapabilities, "review_actions.capabilities", false),
+  operation(
+    REVIEW_IPC_CHANNELS.actionCapabilities,
+    "review_actions.capabilities",
+    false,
+  ),
   operation(REVIEW_IPC_CHANNELS.merge, "review_actions.merge", true),
   operation(REVIEW_IPC_CHANNELS.close, "review_actions.close", true),
   operation(REVIEW_IPC_CHANNELS.reopen, "review_actions.reopen", true),
@@ -46,11 +58,31 @@ export const REVIEW_OPERATIONS: readonly ReviewOperation[] = Object.freeze([
   operation(REVIEW_IPC_CHANNELS.listDrafts, "drafts.list", false),
   operation(REVIEW_IPC_CHANNELS.saveDraft, "drafts.save", true),
   operation(REVIEW_IPC_CHANNELS.discardDraft, "drafts.discard", true),
-  operation(REVIEW_IPC_CHANNELS.startSubmission, "review_submissions.start", true),
-  operation(REVIEW_IPC_CHANNELS.getSubmission, "review_submissions.status", false),
-  operation(REVIEW_IPC_CHANNELS.listSubmissions, "review_submissions.list", false),
-  operation(REVIEW_IPC_CHANNELS.resumeSubmission, "review_submissions.resume", true),
-  operation(REVIEW_IPC_CHANNELS.reconcileSubmission, "review_submissions.reconcile", true),
+  operation(
+    REVIEW_IPC_CHANNELS.startSubmission,
+    "review_submissions.start",
+    true,
+  ),
+  operation(
+    REVIEW_IPC_CHANNELS.getSubmission,
+    "review_submissions.status",
+    false,
+  ),
+  operation(
+    REVIEW_IPC_CHANNELS.listSubmissions,
+    "review_submissions.list",
+    false,
+  ),
+  operation(
+    REVIEW_IPC_CHANNELS.resumeSubmission,
+    "review_submissions.resume",
+    true,
+  ),
+  operation(
+    REVIEW_IPC_CHANNELS.reconcileSubmission,
+    "review_submissions.reconcile",
+    true,
+  ),
 ]);
 
 export function assertReviewParams<M extends ReviewRpcMethod>(
@@ -79,7 +111,13 @@ export function assertReviewParams<M extends ReviewRpcMethod>(
       body(params.body, false);
       return;
     case "review_mutations.reply":
-      keys(params, ["operation_id", "review", "revision", "discussion_id", "body"]);
+      keys(params, [
+        "operation_id",
+        "review",
+        "revision",
+        "discussion_id",
+        "body",
+      ]);
       operationId(params.operation_id);
       handle(params.review);
       revision(params.revision);
@@ -87,7 +125,13 @@ export function assertReviewParams<M extends ReviewRpcMethod>(
       body(params.body, false);
       return;
     case "review_mutations.resolve":
-      keys(params, ["operation_id", "review", "revision", "discussion_id", "resolved"]);
+      keys(params, [
+        "operation_id",
+        "review",
+        "revision",
+        "discussion_id",
+        "resolved",
+      ]);
       operationId(params.operation_id);
       handle(params.review);
       revision(params.revision);
@@ -95,7 +139,11 @@ export function assertReviewParams<M extends ReviewRpcMethod>(
       bool(params.resolved);
       return;
     case "review_mutations.verdict":
-      keys(params, ["operation_id", "review", "revision", "verdict"], ["body", "inline_comments"]);
+      keys(
+        params,
+        ["operation_id", "review", "revision", "verdict"],
+        ["body", "inline_comments"],
+      );
       operationId(params.operation_id);
       handle(params.review);
       revision(params.revision);
@@ -111,7 +159,11 @@ export function assertReviewParams<M extends ReviewRpcMethod>(
       );
       return;
     case "review_actions.merge":
-      keys(params, ["operation_id", "review", "revision"], ["squash", "source_cleanup"]);
+      keys(
+        params,
+        ["operation_id", "review", "revision"],
+        ["squash", "source_cleanup"],
+      );
       revisionOperation(params);
       if (Object.hasOwn(params, "squash")) bool(params.squash);
       if (Object.hasOwn(params, "source_cleanup")) {
@@ -179,7 +231,11 @@ export function assertReviewParams<M extends ReviewRpcMethod>(
     case "review_submissions.reconcile":
       keys(params, ["review", "attempt_id", "resolution"]);
       attemptIdentity(params);
-      oneOf(params.resolution, ["retry_remaining", "return_editable", "mark_submitted"]);
+      oneOf(params.resolution, [
+        "retry_remaining",
+        "return_editable",
+        "mark_submitted",
+      ]);
       return;
   }
 }
@@ -196,8 +252,15 @@ export function assertReviewResult<M extends ReviewRpcMethod>(
   switch (method) {
     case "review_mutations.capabilities":
       capabilities(value, [
-        "general_comment", "inline_comment", "multiline_comment", "reply", "resolve",
-        "approve", "request_changes", "comment_verdict", "atomic_review_batch",
+        "general_comment",
+        "inline_comment",
+        "multiline_comment",
+        "reply",
+        "resolve",
+        "approve",
+        "request_changes",
+        "comment_verdict",
+        "atomic_review_batch",
       ]);
       return;
     case "review_actions.capabilities":
@@ -275,39 +338,69 @@ export function assertReviewBoundResult<M extends ReviewRpcMethod>(
     assertEqual(result.review, params.review, "Review capability result");
     return;
   }
-  if (method.startsWith("review_mutations.") && method !== "review_mutations.capabilities") {
-    assertEqual(result.operation_id, params.operation_id, "Review mutation result");
+  if (
+    method.startsWith("review_mutations.") &&
+    method !== "review_mutations.capabilities"
+  ) {
+    assertEqual(
+      result.operation_id,
+      params.operation_id,
+      "Review mutation result",
+    );
     return;
   }
-  if (method.startsWith("review_actions.") && method !== "review_actions.capabilities") {
+  if (
+    method.startsWith("review_actions.") &&
+    method !== "review_actions.capabilities"
+  ) {
     const receipt =
       method === "review_actions.receipt" ? result.receipt : result;
     if (receipt === null) return;
     const actionResult = record(receipt);
-    assertEqual(actionResult.operation_id, params.operation_id, "Review action result");
+    assertEqual(
+      actionResult.operation_id,
+      params.operation_id,
+      "Review action result",
+    );
     assertEqual(actionResult.review, params.review, "Review action result");
-    assertRevisionEqual(actionResult.revision, params.revision, "Review action result");
+    assertRevisionEqual(
+      actionResult.revision,
+      params.revision,
+      "Review action result",
+    );
     if (method === "review_actions.receipt")
       assertEqual(actionResult.action, params.action, "Review action result");
     return;
   }
   if (method === "drafts.create") {
     assertEqual(result.review, params.review, "Review draft result");
-    assertRevisionEqual(result.revision, params.revision, "Review draft result");
+    assertRevisionEqual(
+      result.revision,
+      params.revision,
+      "Review draft result",
+    );
     return;
   }
   if (method === "drafts.get" || method === "drafts.save") {
     assertEqual(result.review, params.review, "Review draft result");
     assertEqual(result.id, params.draft_id, "Review draft result");
     if (method === "drafts.save")
-      assertAdvanced(result.version, params.expected_version, "Review draft result");
+      assertAdvanced(
+        result.version,
+        params.expected_version,
+        "Review draft result",
+      );
     return;
   }
   if (method === "drafts.discard") {
     const discarded = record(result.discarded);
     assertEqual(discarded.review, params.review, "Discarded review draft");
     assertEqual(discarded.id, params.draft_id, "Discarded review draft");
-    assertEqual(discarded.version, params.expected_version, "Discarded review draft");
+    assertEqual(
+      discarded.version,
+      params.expected_version,
+      "Discarded review draft",
+    );
     return;
   }
   if (method === "drafts.list") {
@@ -319,16 +412,28 @@ export function assertReviewBoundResult<M extends ReviewRpcMethod>(
   if (method === "review_submissions.list") {
     assertPageCursor(result, params);
     for (const item of result.attempts as readonly unknown[])
-      assertEqual(record(item).review, params.review, "Listed review submission");
+      assertEqual(
+        record(item).review,
+        params.review,
+        "Listed review submission",
+      );
     return;
   }
   if (method.startsWith("review_submissions.")) {
     assertEqual(result.review, params.review, "Review submission result");
     if (method === "review_submissions.start") {
       assertEqual(result.draft_id, params.draft_id, "Review submission result");
-      assertEqual(result.frozen_version, params.expected_version, "Review submission result");
+      assertEqual(
+        result.frozen_version,
+        params.expected_version,
+        "Review submission result",
+      );
     } else {
-      assertEqual(result.attempt_id, params.attempt_id, "Review submission result");
+      assertEqual(
+        result.attempt_id,
+        params.attempt_id,
+        "Review submission result",
+      );
     }
   }
 }
@@ -382,13 +487,19 @@ function capabilities(value: unknown, names: readonly string[]): void {
 
 function mutationAnchor(value: unknown): void {
   const anchor = record(value);
-  keys(anchor, ["old_path", "new_path", "line", "side"], ["start_line", "start_side"]);
+  keys(
+    anchor,
+    ["old_path", "new_path", "line", "side"],
+    ["start_line", "start_side"],
+  );
   path(anchor.old_path);
   path(anchor.new_path);
   positiveInteger(anchor.line);
   oneOf(anchor.side, ["LEFT", "RIGHT"]);
-  const hasStartLine = Object.hasOwn(anchor, "start_line") && anchor.start_line !== null;
-  const hasStartSide = Object.hasOwn(anchor, "start_side") && anchor.start_side !== null;
+  const hasStartLine =
+    Object.hasOwn(anchor, "start_line") && anchor.start_line !== null;
+  const hasStartSide =
+    Object.hasOwn(anchor, "start_side") && anchor.start_side !== null;
   if (hasStartLine) positiveInteger(anchor.start_line);
   if (hasStartSide) oneOf(anchor.start_side, ["LEFT", "RIGHT"]);
   if (hasStartLine !== hasStartSide)
@@ -400,8 +511,27 @@ function draftAnchor(value: unknown, output: boolean): void {
   keys(
     anchor,
     output
-      ? ["revision", "old_path", "new_path", "old_line", "new_line", "side", "context_fingerprint", "start_line", "start_side", "stale"]
-      : ["revision", "old_path", "new_path", "old_line", "new_line", "side", "context_fingerprint"],
+      ? [
+          "revision",
+          "old_path",
+          "new_path",
+          "old_line",
+          "new_line",
+          "side",
+          "context_fingerprint",
+          "start_line",
+          "start_side",
+          "stale",
+        ]
+      : [
+          "revision",
+          "old_path",
+          "new_path",
+          "old_line",
+          "new_line",
+          "side",
+          "context_fingerprint",
+        ],
     output ? [] : ["start_line", "start_side", "stale"],
   );
   revision(anchor.revision);
@@ -410,10 +540,17 @@ function draftAnchor(value: unknown, output: boolean): void {
   nullablePositiveInteger(anchor.old_line);
   nullablePositiveInteger(anchor.new_line);
   const selectedSide = oneOf(anchor.side, ["old", "new"]);
-  if (typeof anchor.context_fingerprint !== "string" || !FINGERPRINT.test(anchor.context_fingerprint))
+  if (
+    typeof anchor.context_fingerprint !== "string" ||
+    !FINGERPRINT.test(anchor.context_fingerprint)
+  )
     throw new Error("Invalid review context fingerprint");
-  const startLine = Object.hasOwn(anchor, "start_line") ? anchor.start_line : null;
-  const startSide = Object.hasOwn(anchor, "start_side") ? anchor.start_side : null;
+  const startLine = Object.hasOwn(anchor, "start_line")
+    ? anchor.start_line
+    : null;
+  const startSide = Object.hasOwn(anchor, "start_side")
+    ? anchor.start_side
+    : null;
   nullablePositiveInteger(startLine);
   if (startSide !== null) oneOf(startSide, ["old", "new"]);
   if ((startLine === null) !== (startSide === null))
@@ -440,7 +577,11 @@ function draftContent(
   expectedRevision?: unknown,
 ): void {
   const content = record(value);
-  keys(content, output ? ["body", "verdict", "comments"] : [], output ? [] : ["body", "verdict", "comments"]);
+  keys(
+    content,
+    output ? ["body", "verdict", "comments"] : [],
+    output ? [] : ["body", "verdict", "comments"],
+  );
   draftContentFields(content, output, expectedRevision);
 }
 
@@ -490,7 +631,13 @@ function draftComment(value: unknown, output: boolean): void {
 
 function mutationOutcome(value: unknown): void {
   const outcome = record(value);
-  keys(outcome, ["operation_id", "outcome", "receipt", "reason", "resync_required"]);
+  keys(outcome, [
+    "operation_id",
+    "outcome",
+    "receipt",
+    "reason",
+    "resync_required",
+  ]);
   operationId(outcome.operation_id);
   oneOf(outcome.outcome, ["known", "unknown"]);
   if (outcome.receipt !== null) {
@@ -517,8 +664,17 @@ function mutationOutcome(value: unknown): void {
 function actionReceipt(value: unknown, expected?: ReviewAction): void {
   const receipt = record(value);
   keys(receipt, [
-    "operation_id", "action", "review", "revision", "expected_state", "outcome",
-    "remote_id", "merge_sha", "source_cleanup", "error", "resync_required",
+    "operation_id",
+    "action",
+    "review",
+    "revision",
+    "expected_state",
+    "outcome",
+    "remote_id",
+    "merge_sha",
+    "source_cleanup",
+    "error",
+    "resync_required",
   ]);
   operationId(receipt.operation_id);
   const actual = action(receipt.action);
@@ -530,7 +686,12 @@ function actionReceipt(value: unknown, expected?: ReviewAction): void {
   oneOf(receipt.outcome, ["known", "unknown"]);
   nullableText(receipt.remote_id, MAX_TEXT);
   nullableText(receipt.merge_sha, MAX_TEXT);
-  oneOf(receipt.source_cleanup, ["not_requested", "confirmed", "rejected", "unknown"]);
+  oneOf(receipt.source_cleanup, [
+    "not_requested",
+    "confirmed",
+    "rejected",
+    "unknown",
+  ]);
   if (receipt.error !== null) serviceError(receipt.error);
   bool(receipt.resync_required);
   if (receipt.expected_state !== (actual === "reopen" ? "closed" : "open"))
@@ -553,7 +714,9 @@ function actionReceipt(value: unknown, expected?: ReviewAction): void {
     receipt.source_cleanup !== "not_requested" ||
     receipt.resync_required !== true
   ) {
-    throw new Error("Unknown review action receipt cannot claim remote results");
+    throw new Error(
+      "Unknown review action receipt cannot claim remote results",
+    );
   }
 }
 
@@ -583,8 +746,16 @@ function dropInvalidDrafts(drafts: readonly unknown[]): number {
 function draftSnapshot(value: unknown): void {
   const draft = record(value);
   keys(draft, [
-    "id", "review", "revision", "version", "body", "verdict", "comments",
-    "state", "created_at", "updated_at",
+    "id",
+    "review",
+    "revision",
+    "version",
+    "body",
+    "verdict",
+    "comments",
+    "state",
+    "created_at",
+    "updated_at",
   ]);
   uuid(draft.id);
   handle(draft.review);
@@ -599,9 +770,20 @@ function draftSnapshot(value: unknown): void {
 function submission(value: unknown): void {
   const progress = record(value);
   keys(progress, [
-    "attempt_id", "draft_id", "review", "frozen_version", "state", "outcome",
-    "steps", "receipts", "completed_step_ids", "unknown_step_ids", "atomic",
-    "resync_required", "failure", "plan_available",
+    "attempt_id",
+    "draft_id",
+    "review",
+    "frozen_version",
+    "state",
+    "outcome",
+    "steps",
+    "receipts",
+    "completed_step_ids",
+    "unknown_step_ids",
+    "atomic",
+    "resync_required",
+    "failure",
+    "plan_available",
   ]);
   uuid(progress.attempt_id);
   uuid(progress.draft_id);
@@ -620,9 +802,17 @@ function submission(value: unknown): void {
     const step = record(item);
     keys(step, ["id", "kind", "comment_ids"]);
     text(step.id, MAX_TEXT);
-    if (stepIds.has(step.id as string)) throw new Error("Duplicate review submission step");
+    if (stepIds.has(step.id as string))
+      throw new Error("Duplicate review submission step");
     stepIds.add(step.id as string);
-    oneOf(step.kind, ["general_comment", "inline_comment", "reply", "body", "verdict", "github_review"]);
+    oneOf(step.kind, [
+      "general_comment",
+      "inline_comment",
+      "reply",
+      "body",
+      "verdict",
+      "github_review",
+    ]);
     const commentIds = new Set<string>();
     for (const commentId of array(step.comment_ids, MAX_COMMENTS)) {
       uuid(commentId);
@@ -660,7 +850,9 @@ function submission(value: unknown): void {
     false,
   );
   if (!sameSet(completed, receiptSteps))
-    throw new Error("Completed review submission steps must equal receipt steps");
+    throw new Error(
+      "Completed review submission steps must equal receipt steps",
+    );
   if (
     progress.outcome !== "submitted" &&
     [...completed].some((id) => unknown.has(id))
@@ -687,7 +879,8 @@ function submission(value: unknown): void {
     (progress.outcome === "editable" && progress.state === "unknown") ||
     (progress.outcome === "paused" &&
       (progress.state === "submitting" || progress.state === "partial"));
-  if (!validState) throw new Error("Invalid review submission state and outcome");
+  if (!validState)
+    throw new Error("Invalid review submission state and outcome");
 }
 
 function submissionFailure(
@@ -778,7 +971,11 @@ function serviceError(value: unknown): void {
 }
 
 function operationId(value: unknown): void {
-  if (typeof value !== "string" || value.length > MAX_OPERATION_ID || !OPERATION_ID.test(value))
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_OPERATION_ID ||
+    !OPERATION_ID.test(value)
+  )
     throw new Error("Invalid review operation ID");
 }
 
@@ -862,7 +1059,10 @@ function array(value: unknown, limit: number): readonly unknown[] {
   return value;
 }
 
-function oneOf<const T extends string>(value: unknown, values: readonly T[]): T {
+function oneOf<const T extends string>(
+  value: unknown,
+  values: readonly T[],
+): T {
   if (typeof value !== "string" || !values.includes(value as T))
     throw new Error("Invalid review enum value");
   return value as T;
@@ -916,7 +1116,10 @@ function hasInvalidUnicode(value: string): boolean {
   return false;
 }
 
-function sameSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+function sameSet(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean {
   return left.size === right.size && [...left].every((item) => right.has(item));
 }
 

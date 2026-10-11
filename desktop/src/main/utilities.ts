@@ -1,12 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { constants, type Stats } from "node:fs";
-import {
-  lstat,
-  mkdir,
-  open,
-  unlink,
-  type FileHandle,
-} from "node:fs/promises";
+import { lstat, mkdir, open, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { JsonObject, JsonValue } from "../shared/bridge.js";
 import type {
@@ -31,7 +25,8 @@ const LIVE_EXPORT_LEASE_MILLISECONDS = 23 * 60 * 60 * 1_000;
 export const EDITOR_HANDOFF_HOLD_MILLISECONDS = 5_000;
 const HANDED_OFF_MESSAGE =
   "Editor started and returned at once, so Tongs kept the exported log. A later export removes it after 24 hours. Add the editor's wait flag to remove it when the editor closes.";
-const EXPORT_NAME = /^tongs-slot-([1-8])-job-([1-9][0-9]{0,18})-([0-9a-f]{32})\.log$/;
+const EXPORT_NAME =
+  /^tongs-slot-([1-8])-job-([1-9][0-9]{0,18})-([0-9a-f]{32})\.log$/;
 
 interface UtilityTransport {
   requestRead(
@@ -90,10 +85,7 @@ interface PrivateExport {
   readonly identity: FileIdentity;
 }
 
-type SpawnEditor = (
-  command: string,
-  args: readonly string[],
-) => ChildProcess;
+type SpawnEditor = (command: string, args: readonly string[]) => ChildProcess;
 
 type ScheduleExportExpiry = (expire: () => void) => () => void;
 
@@ -110,8 +102,7 @@ export class WorkspaceUtilities {
     private readonly clipboard: ClipboardWriter,
     exportRoot: string,
     private readonly spawnEditor: SpawnEditor = defaultSpawnEditor,
-    private readonly scheduleExportExpiry: ScheduleExportExpiry =
-      defaultScheduleExportExpiry,
+    private readonly scheduleExportExpiry: ScheduleExportExpiry = defaultScheduleExportExpiry,
     private readonly clock: () => number = () => performance.now(),
   ) {
     if (!path.isAbsolute(exportRoot))
@@ -122,10 +113,9 @@ export class WorkspaceUtilities {
   async copyReviewUrl(review: unknown): Promise<CopyReviewUrlResult> {
     try {
       const handle = opaqueHandle(review);
-      const value = await this.transport.requestRead(
-        "utilities.review_url",
-        { review: handle },
-      ).result;
+      const value = await this.transport.requestRead("utilities.review_url", {
+        review: handle,
+      }).result;
       const plan = assertReviewUrlPlan(value, handle);
       assertHttpsExternalUrl(plan.url);
       await this.clipboard.writeText(plan.url);
@@ -136,7 +126,8 @@ export class WorkspaceUtilities {
     } catch {
       return Object.freeze({
         outcome: "failed",
-        message: "The review URL could not be copied. Check clipboard access and retry.",
+        message:
+          "The review URL could not be copied. Check clipboard access and retry.",
       });
     }
   }
@@ -157,7 +148,8 @@ export class WorkspaceUtilities {
     } catch {
       return Object.freeze({
         outcome: "failed",
-        message: "The shared API cache could not be cleared. Retry after reconnecting the local service.",
+        message:
+          "The shared API cache could not be cleared. Retry after reconnecting the local service.",
       });
     }
   }
@@ -227,14 +219,15 @@ export class WorkspaceUtilities {
             attachBoundedCleanup(
               started.completion,
               started.cancelCompletion,
-              (exit) => this.finishEditor(
-                exit,
-                startedAt,
-                retainedPath,
-                retainedFile,
-                retainedIdentity,
-                retainedReservation,
-              ),
+              (exit) =>
+                this.finishEditor(
+                  exit,
+                  startedAt,
+                  retainedPath,
+                  retainedFile,
+                  retainedIdentity,
+                  retainedReservation,
+                ),
               () => this.scheduleExpiry(retainedFile),
               this.scheduleExportExpiry,
             );
@@ -270,14 +263,15 @@ export class WorkspaceUtilities {
       attachBoundedCleanup(
         started.completion,
         started.cancelCompletion,
-        (exit) => this.finishEditor(
-          exit,
-          startedAt,
-          retainedPath,
-          retainedFile,
-          retainedIdentity,
-          retainedReservation,
-        ),
+        (exit) =>
+          this.finishEditor(
+            exit,
+            startedAt,
+            retainedPath,
+            retainedFile,
+            retainedIdentity,
+            retainedReservation,
+          ),
         () => this.scheduleExpiry(retainedFile),
         this.scheduleExportExpiry,
       );
@@ -288,12 +282,7 @@ export class WorkspaceUtilities {
       );
     } catch (error) {
       if (reservation !== null) {
-        await this.cleanupExport(
-          exportPath,
-          exportFile,
-          identity,
-          reservation,
-        );
+        await this.cleanupExport(exportPath, exportFile, identity, reservation);
       }
       if (error instanceof ExportRootError) {
         return utilityResult("failed", error.message);
@@ -424,7 +413,10 @@ export async function resolveEditorExportRoot(
   return path.join(path.resolve(temporaryDirectory), name);
 }
 
-function defaultSpawnEditor(command: string, args: readonly string[]): ChildProcess {
+function defaultSpawnEditor(
+  command: string,
+  args: readonly string[],
+): ChildProcess {
   return spawn(command, args, {
     detached: true,
     shell: false,
@@ -527,7 +519,8 @@ async function startEditor(
   if (launchOutcome === "error") {
     return {
       ok: false,
-      message: "The configured editor executable is unavailable or could not start.",
+      message:
+        "The configured editor executable is unavailable or could not start.",
       retain: false,
     };
   }
@@ -545,24 +538,26 @@ async function startEditor(
   const earlyExit = errorObserved
     ? "error"
     : exitObserved
-    ? observedExitCode
-    : await Promise.race<number | null | "error" | "running">([
-        completion,
-        new Promise<"running">((resolve) =>
-          setTimeout(() => resolve("running"), EARLY_EXIT_MILLISECONDS),
-        ),
-      ]);
+      ? observedExitCode
+      : await Promise.race<number | null | "error" | "running">([
+          completion,
+          new Promise<"running">((resolve) =>
+            setTimeout(() => resolve("running"), EARLY_EXIT_MILLISECONDS),
+          ),
+        ]);
   if (earlyExit === "error") {
     return {
       ok: false,
-      message: "The configured editor reported an error immediately after starting.",
+      message:
+        "The configured editor reported an error immediately after starting.",
       retain: false,
     };
   }
   if (earlyExit !== "running" && earlyExit !== 0) {
     return {
       ok: false,
-      message: "The configured editor exited with an error immediately after starting.",
+      message:
+        "The configured editor exited with an error immediately after starting.",
       retain: false,
     };
   }
@@ -610,7 +605,8 @@ async function createPrivateExport(filePath: string): Promise<PrivateExport> {
     const metadata = await file.stat();
     if (
       !metadata.isFile() ||
-      (typeof process.getuid === "function" && metadata.uid !== process.getuid())
+      (typeof process.getuid === "function" &&
+        metadata.uid !== process.getuid())
     ) {
       throw new Error("The editor export file is not owned by this user");
     }
@@ -645,7 +641,8 @@ async function removeExport(
     if (
       !metadata.isFile() ||
       metadata.isSymbolicLink() ||
-      (typeof process.getuid === "function" && metadata.uid !== process.getuid())
+      (typeof process.getuid === "function" &&
+        metadata.uid !== process.getuid())
     ) {
       return false;
     }

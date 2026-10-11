@@ -384,7 +384,10 @@ export function useDiscussionThreads(
   const anchored = useMemo(() => {
     const grouped = new Map<
       string,
-      { readonly discussion: DiscussionDto; readonly target: DiscussionDiffTarget }[]
+      {
+        readonly discussion: DiscussionDto;
+        readonly target: DiscussionDiffTarget;
+      }[]
     >();
     const byPath = new Map<string, ThreadFileCounts>();
     for (const discussion of threads) {
@@ -397,7 +400,8 @@ export function useDiscussionThreads(
       const counts = byPath.get(target.path) ?? NO_COUNTS;
       byPath.set(target.path, {
         threads: counts.threads + 1,
-        unresolved: counts.unresolved + (threadIsUnresolved(discussion) ? 1 : 0),
+        unresolved:
+          counts.unresolved + (threadIsUnresolved(discussion) ? 1 : 0),
       });
     }
     // The place inside a group is only known once the group is complete, so it
@@ -452,7 +456,9 @@ export function useDiscussionThreads(
   const capabilityReplyReason = composer.threadReason("reply");
   const replyReason = useCallback(
     (discussionId: string): string | null =>
-      staleIds.has(discussionId) ? THREAD_REFRESH_REFUSAL : capabilityReplyReason,
+      staleIds.has(discussionId)
+        ? THREAD_REFRESH_REFUSAL
+        : capabilityReplyReason,
     [capabilityReplyReason, staleIds],
   );
   const resolveReason = useCallback(
@@ -521,7 +527,10 @@ export function useDiscussionThreads(
       setNotice(
         trouble.length === 0
           ? null
-          : { discussionId: id, text: `${REPLY_PUBLISHED} ${trouble.join(" ")}` },
+          : {
+              discussionId: id,
+              text: `${REPLY_PUBLISHED} ${trouble.join(" ")}`,
+            },
       );
       if (!reread) setStaleIds((current) => new Set(current).add(id));
       setComposingId(null);

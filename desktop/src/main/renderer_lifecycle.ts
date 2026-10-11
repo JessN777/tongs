@@ -104,7 +104,11 @@ export class ServiceRecoveryPolicy {
     this.#now = options.now ?? Date.now;
     this.#maxRestarts = options.maxRestarts ?? MAX_AUTOMATIC_RESTARTS;
     this.#windowMs = options.windowMs ?? AUTOMATIC_RESTART_WINDOW_MS;
-    if (!Number.isSafeInteger(this.#maxRestarts) || this.#maxRestarts < 0 || !(this.#windowMs > 0)) {
+    if (
+      !Number.isSafeInteger(this.#maxRestarts) ||
+      this.#maxRestarts < 0 ||
+      !(this.#windowMs > 0)
+    ) {
       throw new Error("Service recovery limits must be positive");
     }
   }

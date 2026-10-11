@@ -20,10 +20,7 @@ import {
   CI_OPERATIONS,
   type CIOperation,
 } from "./ci.js";
-import type {
-  CIMutationIPCResult,
-  CIMutationReceipt,
-} from "../shared/ci.js";
+import type { CIMutationIPCResult, CIMutationReceipt } from "../shared/ci.js";
 import {
   reviewMutationMessage,
   type ReviewMutationIPCResult,
@@ -148,11 +145,14 @@ export class DesktopIpcController {
       }
     };
     this.transport.on("event", this.eventListener);
-    const serviceStatus = new ServiceStatusPublisher(this.transport, (status) => {
-      if (!this.window.isDestroyed()) {
-        this.window.webContents.send(IPC_CHANNELS.serviceStatus, status);
-      }
-    });
+    const serviceStatus = new ServiceStatusPublisher(
+      this.transport,
+      (status) => {
+        if (!this.window.isDestroyed()) {
+          this.window.webContents.send(IPC_CHANNELS.serviceStatus, status);
+        }
+      },
+    );
     ipcMain.handle(IPC_CHANNELS.getServiceStatus, (event) => {
       assertAuthorizedSender(event, this.window.webContents);
       return serviceStatus.current;
@@ -319,7 +319,10 @@ export class DesktopIpcController {
         value,
       ).result;
       assertReviewBoundResult(operation.method, value, result);
-      const response = { result, error: null } satisfies ReviewMutationIPCResult<JsonValue>;
+      const response = {
+        result,
+        error: null,
+      } satisfies ReviewMutationIPCResult<JsonValue>;
       return response as JsonValue;
     } catch (error) {
       const response = {

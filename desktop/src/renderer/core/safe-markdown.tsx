@@ -150,7 +150,10 @@ export const SafeMarkdown = memo(function SafeMarkdown({
       a: ({ children, href }) => {
         const destination = admitMarkdownExternalUrl(href ?? "");
         return destination ? (
-          <SafeExternalLink destination={destination} openExternal={openExternal}>
+          <SafeExternalLink
+            destination={destination}
+            openExternal={openExternal}
+          >
             {children}
           </SafeExternalLink>
         ) : (
@@ -222,7 +225,9 @@ function SafeExternalLink({
   const descriptionId = useId();
   const host = externalLinkHost(destination);
   const mismatched = linkTextNamesOtherOrigin(linkText(children), destination);
-  const activate = async (event: MouseEvent<HTMLButtonElement>): Promise<void> => {
+  const activate = async (
+    event: MouseEvent<HTMLButtonElement>,
+  ): Promise<void> => {
     event.preventDefault();
     if (opening) return;
     setOpening(true);

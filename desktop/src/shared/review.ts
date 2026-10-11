@@ -7,16 +7,8 @@ import type {
 
 export type ReviewVerdict = "comment" | "approve" | "request_changes";
 export type DraftState =
-  | "editable"
-  | "submitting"
-  | "partial"
-  | "unknown"
-  | "submitted";
-export type SubmissionOutcome =
-  | "submitted"
-  | "paused"
-  | "unknown"
-  | "editable";
+  "editable" | "submitting" | "partial" | "unknown" | "submitted";
+export type SubmissionOutcome = "submitted" | "paused" | "unknown" | "editable";
 export type SubmissionStepKind =
   | "general_comment"
   | "inline_comment"
@@ -25,47 +17,54 @@ export type SubmissionStepKind =
   | "verdict"
   | "github_review";
 export type ReconciliationResolution =
-  | "retry_remaining"
-  | "return_editable"
-  | "mark_submitted";
+  "retry_remaining" | "return_editable" | "mark_submitted";
 export type ReviewAction = "merge" | "close" | "reopen" | "unapprove";
 export type SourceCleanupOutcome =
-  | "not_requested"
-  | "confirmed"
-  | "rejected"
-  | "unknown";
+  "not_requested" | "confirmed" | "rejected" | "unknown";
 
 /** A full session write ledger: only a new session frees space. */
 export const CAPACITY_EXHAUSTED_MESSAGE =
   "Too many write actions in this session. Restart tongs to continue.";
 
-const REVIEW_MUTATION_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
-  authentication_failed: "Sign in to the forge again, then retry the review action.",
-  capacity_exhausted: CAPACITY_EXHAUSTED_MESSAGE,
-  closed: "This review session is closed. Reopen it before continuing.",
-  configuration_invalid:
-    "Review actions are unavailable because the local service configuration is invalid.",
-  conflict: "The forge refused this action: the review changed remotely or its branch conflicts with the target. Refresh, and check for merge conflicts.",
-  invalid_input: "Check the review action input and the current remote state.",
-  invalid_response: "The review action result could not be confirmed.",
-  mutation_timeout: "The review action result could not be confirmed.",
-  network_unavailable:
-    "The forge could not be reached. Refresh remote state before deciding whether to retry.",
-  not_found: "The review or selected target no longer exists. Refresh the review.",
-  not_running: "Restart the local review service, then refresh the review.",
-  not_started: "This review operation has not started. Refresh its status before continuing.",
-  permission_denied: "You do not have permission to perform this review action.",
-  rate_limited: "The forge rate limit blocked this action. Wait, then refresh before retrying.",
-  request_cancelled: "The review action result could not be confirmed.",
-  resource_not_issued: "Reload the review before performing this action.",
-  revision_changed: "The review revision changed. Reload the latest revision before continuing.",
-  revision_unavailable: "The selected review revision is unavailable. Reload the review.",
-  shutting_down: "The local review service is shutting down. Restart it and refresh the review.",
-  shutdown_failed: "Restart the local review service, then refresh the review.",
-  unexpected_eof: "The review action result could not be confirmed.",
-  unsupported: "This forge does not support the selected review action.",
-  write_failed: "The review action result could not be confirmed.",
-});
+const REVIEW_MUTATION_MESSAGES: Readonly<Record<string, string>> =
+  Object.freeze({
+    authentication_failed:
+      "Sign in to the forge again, then retry the review action.",
+    capacity_exhausted: CAPACITY_EXHAUSTED_MESSAGE,
+    closed: "This review session is closed. Reopen it before continuing.",
+    configuration_invalid:
+      "Review actions are unavailable because the local service configuration is invalid.",
+    conflict:
+      "The forge refused this action: the review changed remotely or its branch conflicts with the target. Refresh, and check for merge conflicts.",
+    invalid_input:
+      "Check the review action input and the current remote state.",
+    invalid_response: "The review action result could not be confirmed.",
+    mutation_timeout: "The review action result could not be confirmed.",
+    network_unavailable:
+      "The forge could not be reached. Refresh remote state before deciding whether to retry.",
+    not_found:
+      "The review or selected target no longer exists. Refresh the review.",
+    not_running: "Restart the local review service, then refresh the review.",
+    not_started:
+      "This review operation has not started. Refresh its status before continuing.",
+    permission_denied:
+      "You do not have permission to perform this review action.",
+    rate_limited:
+      "The forge rate limit blocked this action. Wait, then refresh before retrying.",
+    request_cancelled: "The review action result could not be confirmed.",
+    resource_not_issued: "Reload the review before performing this action.",
+    revision_changed:
+      "The review revision changed. Reload the latest revision before continuing.",
+    revision_unavailable:
+      "The selected review revision is unavailable. Reload the review.",
+    shutting_down:
+      "The local review service is shutting down. Restart it and refresh the review.",
+    shutdown_failed:
+      "Restart the local review service, then refresh the review.",
+    unexpected_eof: "The review action result could not be confirmed.",
+    unsupported: "This forge does not support the selected review action.",
+    write_failed: "The review action result could not be confirmed.",
+  });
 
 export function reviewMutationMessage(code: string): string {
   return (
@@ -120,7 +119,10 @@ export interface DraftInlineAnchorInputDto {
   readonly stale?: boolean;
 }
 
-export interface DraftInlineAnchorDto extends Omit<DraftInlineAnchorInputDto, "start_line" | "start_side" | "stale"> {
+export interface DraftInlineAnchorDto extends Omit<
+  DraftInlineAnchorInputDto,
+  "start_line" | "start_side" | "stale"
+> {
   readonly start_line: number | null;
   readonly start_side: "old" | "new" | null;
   readonly stale: boolean;
@@ -142,9 +144,7 @@ export interface ReplyDraftCommentDto extends DraftCommentBase {
   readonly thread_id: string;
 }
 export type DraftCommentDto =
-  | GeneralDraftCommentDto
-  | InlineDraftCommentDto
-  | ReplyDraftCommentDto;
+  GeneralDraftCommentDto | InlineDraftCommentDto | ReplyDraftCommentDto;
 
 export type DraftCommentInputDto =
   | GeneralDraftCommentDto
@@ -474,7 +474,9 @@ export interface ReviewDesktopBridge {
   ): DesktopRead<ReviewCapabilitiesResult<ReviewActionCapabilitiesDto>>;
   mergeReview(params: MergeParams): Promise<ReviewActionReceiptDto>;
   closeReview(params: RevisionOperationParams): Promise<ReviewActionReceiptDto>;
-  reopenReview(params: RevisionOperationParams): Promise<ReviewActionReceiptDto>;
+  reopenReview(
+    params: RevisionOperationParams,
+  ): Promise<ReviewActionReceiptDto>;
   unapproveReview(
     params: RevisionOperationParams,
   ): Promise<ReviewActionReceiptDto>;
@@ -497,9 +499,7 @@ export interface ReviewDesktopBridge {
   listReviewSubmissions(
     params: ListSubmissionsParams,
   ): DesktopRead<SubmissionListResult>;
-  resumeReviewSubmission(
-    params: AttemptParams,
-  ): Promise<SubmissionProgressDto>;
+  resumeReviewSubmission(params: AttemptParams): Promise<SubmissionProgressDto>;
   reconcileReviewSubmission(
     params: ReconcileSubmissionParams,
   ): Promise<SubmissionProgressDto>;
