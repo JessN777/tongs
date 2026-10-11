@@ -117,3 +117,42 @@ def test_provider_rejects_unknown_method() -> None:
             await provider.stop()
 
     asyncio.run(run())
+
+
+def test_provider_rejects_refresh_with_parameters() -> None:
+    async def run() -> RecordingHost:
+        provider = ExampleDashboardProvider()
+        host = RecordingHost()
+        await provider.start(make_context(host))
+        try:
+            with pytest.raises(ValueError, match="takes no parameters"):
+                await provider.call(
+                    "refresh",
+                    freeze_json_object({"force": True}),
+                    DesktopCallContext("refresh-params-1", DesktopCancellation()),
+                )
+        finally:
+            await provider.stop()
+        return host
+
+    host = asyncio.run(run())
+    assert host.events == []
+
+
+def test_stopped_provider_does_not_publish_events() -> None:
+    async def run() -> RecordingHost:
+        provider = ExampleDashboardProvider()
+        host = RecordingHost()
+        await provider.start(make_context(host))
+        await provider.stop()
+        with pytest.raises(RuntimeError, match="not started"):
+            await provider.call(
+                "refresh",
+                freeze_json_object({}),
+                DesktopCallContext("refresh-stopped-1", DesktopCancellation()),
+            )
+        return host
+
+    host = asyncio.run(run())
+    assert host.events == []
+    assert host.notifications == []

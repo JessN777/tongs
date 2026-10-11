@@ -195,3 +195,82 @@ test("a refresh that rejects after cleanup is consumed without notification", as
   assert.deepEqual(fixture.notices, []);
   assert.equal(container.children.length, 0);
 });
+
+test("a refresh that fails while mounted notifies one error and re-enables the button", async () => {
+  globalThis.document = { createElement: (tagName) => new MockElement(tagName) };
+  const container = new MockElement("main");
+  const fixture = makeApi(container);
+  fixture.api = Object.freeze({
+    ...fixture.api,
+    invoke: async (method, params) => {
+      fixture.calls.push([method, params]);
+      throw new Error("refresh failed");
+    },
+  });
+  const cleanup = mount(container, fixture.api);
+  const refresh = container.children.at(-1);
+
+  await refresh.click();
+
+  assert.deepEqual(fixture.calls, [["refresh", {}]]);
+  assert.deepEqual(fixture.notices, [["Example dashboard refresh failed", "error"]]);
+  assert.equal(refresh.disabled, false);
+  cleanup();
+});
+
+test("each review in a snapshot is appended to the review list", () => {
+  globalThis.document = { createElement: (tagName) => new MockElement(tagName) };
+  const container = new MockElement("main");
+  const fixture = makeApi(container);
+  const cleanup = mount(container, fixture.api);
+  const reviews = find(container, "ul");
+  assert.equal(reviews.children.length, 0);
+
+  fixture.listeners.get("refreshed")({
+    summary: { open_reviews: 2, waiting_on_me: 0, ci_passing: 1 },
+    reviews: [
+      { title: "First review", repository: "example/one", status: "ready" },
+      { title: "Second review", repository: "example/two", status: "ci" },
+    ],
+  });
+
+  assert.equal(reviews.children.length, 2);
+  assert.deepEqual(
+    reviews.children.map((item) => item.children.map((child) => child.textContent)),
+    [
+      ["First review", "example/one · ready"],
+      ["Second review", "example/two · ci"],
+    ],
+  );
+  cleanup();
+});
+
+test("navigation is ignored after the signal aborts", async () => {
+  globalThis.document = { createElement: (tagName) => new MockElement(tagName) };
+  const container = new MockElement("main");
+  const fixture = makeApi(container);
+  const cleanup = mount(container, fixture.api);
+  const navigate = container.children.at(-2);
+
+  fixture.controller.abort();
+  await navigate.click();
+
+  assert.deepEqual(fixture.navigations, []);
+  cleanup();
+});
+
+test("a navigation handler captured before unmount is ignored after it", async () => {
+  globalThis.document = { createElement: (tagName) => new MockElement(tagName) };
+  const container = new MockElement("main");
+  const fixture = makeApi(container);
+  const cleanup = mount(container, fixture.api);
+  const navigate = container.children.at(-2);
+  const onNavigate = navigate.listeners.get("click");
+  assert.equal(typeof onNavigate, "function");
+
+  cleanup();
+  onNavigate();
+
+  assert.deepEqual(fixture.navigations, []);
+  assert.equal(fixture.api.signal.aborted, false);
+});
