@@ -23,7 +23,7 @@
     "@types/react-dom": "19.3.0",
     "electron": "44.2.0",
     "esbuild": "0.28.2",
-    "jsdom": "27.0.0",
+    "jsdom": "30.1.2",
     "typescript": "7.0.2"
   },
   "dependencies": {
