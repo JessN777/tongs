@@ -34,6 +34,7 @@ from tongs.forges.models import (
     Commit,
     Discussion,
     ForgeHost,
+    JobLogTail,
     MRDetail,
     MRPage,
     MRSummary,
@@ -1105,6 +1106,31 @@ class ApplicationSession:
             hostname=ref.repository.hostname,
         )
         if not isinstance(result, str):
+            raise ServiceError(
+                ServiceErrorCode.INVALID_RESPONSE,
+                "The forge returned an invalid job log.",
+            )
+        return result
+
+    async def get_job_log_tail(self, ref: JobRef, max_bytes: int) -> JobLogTail:
+        """Read the end of a job log, at most ``max_bytes`` UTF-8 bytes of it.
+
+        The log is streamed, so a log of any size is held in bounded memory,
+        and a log over the budget returns its end marked as truncated.
+        """
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        client = await self._client_for_repository(ref.repository, "get_job_log")
+        result = await self._call(
+            client.get_job_log_tail(ref.repository.project_path, ref.job_id, max_bytes),
+            operation="get_job_log",
+            hostname=ref.repository.hostname,
+        )
+        if (
+            not isinstance(result, JobLogTail)
+            or not isinstance(result.text, str)
+            or len(result.text.encode("utf-8", errors="replace")) > max_bytes
+        ):
             raise ServiceError(
                 ServiceErrorCode.INVALID_RESPONSE,
                 "The forge returned an invalid job log.",

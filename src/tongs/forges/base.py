@@ -14,6 +14,7 @@ from tongs.forges.models import (
     Discussion,
     ForgeMergeResult,
     ForgeMutationResult,
+    JobLogTail,
     MRDetail,
     MRPage,
     MRSummary,
@@ -276,6 +277,21 @@ class ForgeClient(ABC):
 
     @abstractmethod
     async def get_job_log(self, repo_path: str, job_id: int) -> str: ...
+
+    async def get_job_log_tail(
+        self, repo_path: str, job_id: int, max_bytes: int
+    ) -> JobLogTail:
+        """Return the last ``max_bytes`` UTF-8 bytes of a job log.
+
+        The default reads the whole log first. Clients that can stream the log
+        override this so a large log is never held in full.
+        """
+        if max_bytes < 0:
+            raise ValueError("max_bytes must not be negative")
+        data = (await self.get_job_log(repo_path, job_id)).encode(
+            "utf-8", errors="replace"
+        )
+        return JobLogTail.from_bytes(data, len(data), max_bytes)
 
     async def stream_job_log(self, repo_path: str, job_id: int) -> AsyncIterator[str]:
         """Stream job log lines. Default: return full log as single yield."""

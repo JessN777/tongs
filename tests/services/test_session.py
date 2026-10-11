@@ -29,6 +29,7 @@ from tongs.forges.models import (
     ForgeHost,
     ForgeMutationResult,
     InlineComment,
+    JobLogTail,
     MRDetail,
     MRState,
     MRSummary,
@@ -293,6 +294,15 @@ class FakeClient:
 
     async def get_job_log(self, repo_path: str, job_id: int) -> str:
         return "safe log"
+
+    async def get_job_log_tail(
+        self, repo_path: str, job_id: int, max_bytes: int
+    ) -> object:
+        self.job_log_tail_budget = max_bytes
+        if getattr(self, "job_log_tail", None) is not None:
+            return self.job_log_tail
+        data = b"first\nsafe log\n"
+        return JobLogTail.from_bytes(data, len(data), max_bytes)
 
     async def retry_pipeline(self, repo_path: str, pipeline_id: int) -> None:
         await self._mutate_ci("retry_pipeline", repo_path, pipeline_id)
@@ -1909,6 +1919,29 @@ class TestReviewReads:
         assert (await session.list_review_pipelines(review))[0].id == 12
         assert (await session.get_pipeline_jobs(PipelineRef(repo.ref, 11)))[0].id == 21
         assert await session.get_job_log(JobRef(repo.ref, 21)) == "safe log"
+        await session.close()
+
+    @pytest.mark.asyncio
+    async def test_job_log_tail_passes_its_budget_and_checks_the_result(
+        self,
+    ) -> None:
+        registry = FakeRegistry()
+        session = await start_session(registry)
+        repo = await session.open_repository("github.com", "acme/widgets")
+        job = JobRef(repo.ref, 21)
+
+        tail = await session.get_job_log_tail(job, 10)
+
+        client = registry.clients["github.com"]
+        assert client.job_log_tail_budget == 10
+        assert tail == JobLogTail("safe log\n", 15, True)
+        for invalid in ("safe log", JobLogTail("x" * 11, 11, False)):
+            client.job_log_tail = invalid
+            with pytest.raises(ServiceError) as caught:
+                await session.get_job_log_tail(job, 10)
+            assert caught.value.code is ServiceErrorCode.INVALID_RESPONSE
+        with pytest.raises(ValueError, match="positive"):
+            await session.get_job_log_tail(job, 0)
         await session.close()
 
     @pytest.mark.asyncio
