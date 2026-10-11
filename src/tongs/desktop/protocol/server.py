@@ -1314,7 +1314,13 @@ class DesktopSidecarServer:
         self, params: JsonObject, _context: RequestContext
     ) -> object:
         review = self._review_param(params)
-        return {"commits": await self._session.get_commits(review)}
+        commits = await self._session.get_commits(review)
+        return {
+            "commits": [
+                _absent_text_as_null(to_json_value(commit), _COMMIT_OPTIONAL_TEXT)
+                for commit in commits
+            ]
+        }
 
     async def _pipelines_list(
         self, params: JsonObject, _context: RequestContext
@@ -1560,14 +1566,16 @@ class DesktopSidecarServer:
         ref = PipelineRef(repository, pipeline.id)
         return {
             "handle": self._handles.issue(HandleKind.PIPELINE, ref),
-            "value": cast(JsonValue, to_json_value(pipeline)),
+            "value": _absent_text_as_null(
+                to_json_value(pipeline), _PIPELINE_OPTIONAL_TEXT
+            ),
         }
 
     def _job_wire(self, pipeline: PipelineRef, job: PipelineJob) -> JsonObject:
         ref = JobRef(pipeline.repository, job.id)
         return {
             "handle": self._handles.issue(HandleKind.JOB, ref, parent=pipeline),
-            "value": cast(JsonValue, to_json_value(job)),
+            "value": _absent_text_as_null(to_json_value(job), _JOB_OPTIONAL_TEXT),
         }
 
     @staticmethod
@@ -2163,7 +2171,7 @@ def _detail_wire(snapshot: ReviewSnapshot) -> JsonObject:
     result.update(
         {
             "description": detail.description,
-            "merge_status": detail.merge_status,
+            "merge_status": detail.merge_status or None,
             "approvals": cast(JsonValue, to_json_value(detail.approvals)),
             "reviewers": cast(JsonValue, to_json_value(detail.reviewers)),
             "assignees": cast(JsonValue, to_json_value(detail.assignees)),
@@ -2177,6 +2185,26 @@ def _detail_wire(snapshot: ReviewSnapshot) -> JsonObject:
         }
     )
     return result
+
+
+# Text fields a forge may leave out, per projected model. The core models spell
+# such an absent value as the empty string (or carry the forge's own null), while
+# the desktop wire spells every absent optional text as null and rejects an
+# empty string, so one missing value cannot make the client refuse a whole list.
+# Fields not named here are required and keep whatever the core holds, so a
+# broken required value still fails loudly at the client boundary.
+_PIPELINE_OPTIONAL_TEXT = frozenset({"web_url", "source"})
+_JOB_OPTIONAL_TEXT = frozenset({"stage", "web_url"})
+_COMMIT_OPTIONAL_TEXT = frozenset({"web_url"})
+
+
+def _absent_text_as_null(value: JsonValue, optional: frozenset[str]) -> JsonObject:
+    """Return a projected model with each absent optional text as null."""
+    projected = cast(JsonObject, value)
+    return {
+        key: (item or None) if key in optional else item
+        for key, item in projected.items()
+    }
 
 
 def _discussion_wire(discussion: JsonObject) -> JsonObject:

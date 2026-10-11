@@ -179,6 +179,48 @@ test("selected pipeline and job open only their service DTO forge URLs", async (
   ]);
 });
 
+test("a pipeline and job the forge left partly blank still render", async () => {
+  const opened = [];
+  const bare = pipeline(101);
+  const bareJob = job(201);
+  const bridge = baseBridge({
+    listReviewPipelines: () =>
+      read({
+        pipelines: [
+          { ...bare, value: { ...bare.value, source: null, web_url: null } },
+        ],
+      }),
+    listJobs: () =>
+      read({
+        jobs: [
+          { ...bareJob, value: { ...bareJob.value, stage: null, web_url: null } },
+        ],
+      }),
+    openExternal: async (url) => {
+      opened.push(url);
+      return true;
+    },
+  });
+  const view = renderFeature(bridge);
+  await view.findByText("build-201");
+
+  assert.equal(view.queryAllByText("No stage").length, 1);
+  const meta = view.container.querySelector(".ci-summary .ci-meta").textContent;
+  assert.equal(meta.startsWith("branch-101 · "), true);
+  assert.equal(meta.split(" · ").length, 2);
+  assert.equal(view.container.textContent.includes("null"), false);
+  for (const [name, title] of [
+    ["Open pipeline on forge", "The forge did not provide a link for this pipeline."],
+    ["Open job on forge", "The forge did not provide a link for this job."],
+  ]) {
+    const button = view.getByRole("button", { name });
+    assert.equal(button.disabled, true);
+    assert.equal(button.getAttribute("title"), title);
+    fireEvent.click(button);
+  }
+  assert.deepEqual(opened, []);
+});
+
 test("loaded selected job opens in editor once and reports exact outcome", async () => {
   const jobs = [];
   const completion = deferred();

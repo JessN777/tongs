@@ -281,3 +281,136 @@ test("a review detail rejects a non-boolean flag and any unknown key", () => {
     /Invalid reviews\.get result/,
   );
 });
+
+function pipelinesResult(overrides = {}) {
+  return {
+    pipelines: [
+      {
+        handle: "pipeline-handle",
+        value: {
+          id: 1,
+          status: "success",
+          ref: "main",
+          sha: "abc123",
+          web_url: "https://github.com/acme/repo/actions/runs/1",
+          source: "push",
+          created_at: null,
+          finished_at: null,
+          duration_seconds: null,
+          ...overrides,
+        },
+      },
+    ],
+  };
+}
+
+function jobsResult(overrides = {}) {
+  return {
+    jobs: [
+      {
+        handle: "job-handle",
+        value: {
+          id: 2,
+          name: "build",
+          stage: "CI",
+          status: "queued",
+          web_url: "https://github.com/acme/repo/actions/runs/1/job/2",
+          started_at: null,
+          finished_at: null,
+          duration_seconds: null,
+          allow_failure: false,
+          ...overrides,
+        },
+      },
+    ],
+  };
+}
+
+function commitsResult(overrides = {}) {
+  return {
+    commits: [
+      {
+        sha: "abc123def456",
+        short_sha: "abc123de",
+        title: "Fix the build",
+        message: "Fix the build",
+        author: { username: "dev", display_name: "" },
+        created_at: null,
+        web_url: "https://github.com/acme/repo/commit/abc123def456",
+        ...overrides,
+      },
+    ],
+  };
+}
+
+// Each read and the fields a forge may leave out, which the sidecar sends as
+// null (#184). Every other text field of these rows stays required.
+const OPTIONAL_TEXT = [
+  ["review_pipelines.list", pipelinesResult, ["source", "web_url"]],
+  ["pipelines.list", pipelinesResult, ["source", "web_url"]],
+  ["jobs.list", jobsResult, ["stage", "web_url"]],
+  ["commits.list", commitsResult, ["web_url"]],
+];
+const REQUIRED_TEXT = [
+  ["pipelines.list", pipelinesResult, ["status", "ref", "sha"]],
+  ["jobs.list", jobsResult, ["name", "status"]],
+  ["commits.list", commitsResult, ["sha", "short_sha", "title", "message"]],
+];
+
+test("a pipeline with no source and a job with no stage pass the read boundary", () => {
+  for (const [method, result, fields] of OPTIONAL_TEXT) {
+    assertResult(method, result());
+    assertResult(
+      method,
+      result(Object.fromEntries(fields.map((field) => [field, null]))),
+    );
+  }
+  assertResult("reviews.get", reviewSnapshot({ merge_status: null }));
+});
+
+test("an absent optional field must be null, never empty or another type", () => {
+  for (const [method, result, fields] of OPTIONAL_TEXT) {
+    for (const field of fields) {
+      for (const bad of ["", 7, false, {}]) {
+        assert.throws(
+          () => assertResult(method, result({ [field]: bad })),
+          (error) => {
+            assert.match(error.message, new RegExp(`Invalid ${method.replace(".", "\\.")} result`));
+            assert.match(error.message, new RegExp(`"${field}" must be`));
+            return true;
+          },
+          `${method} ${field}=${JSON.stringify(bad)}`,
+        );
+      }
+    }
+  }
+  for (const bad of ["", 7]) {
+    assert.throws(
+      () => assertResult("reviews.get", reviewSnapshot({ merge_status: bad })),
+      /"merge_status" must be null or non-empty text/,
+    );
+  }
+});
+
+test("required pipeline, job and commit text still rejects null and empty text", () => {
+  for (const [method, result, fields] of REQUIRED_TEXT) {
+    for (const field of fields) {
+      for (const bad of [null, "", 7]) {
+        assert.throws(
+          () => assertResult(method, result({ [field]: bad })),
+          new RegExp(`Invalid ${method.replace(".", "\\.")} result`),
+          `${method} ${field}=${JSON.stringify(bad)}`,
+        );
+      }
+    }
+  }
+  // A missing key is not an absent value: every row keeps its exact shape.
+  const { stage: _stage, ...withoutStage } = jobsResult().jobs[0].value;
+  assert.throws(
+    () =>
+      assertResult("jobs.list", {
+        jobs: [{ handle: "job-handle", value: withoutStage }],
+      }),
+    /Invalid jobs\.list result/,
+  );
+});

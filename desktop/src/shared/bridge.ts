@@ -46,7 +46,7 @@ export interface ReviewSummaryDto {
   readonly deletions: number | null;
 }
 export interface ReviewDetailDto extends ReviewSummaryDto {
-  readonly description: string; readonly merge_status: string;
+  readonly description: string; readonly merge_status: string | null;
   readonly approvals: readonly UserDto[]; readonly reviewers: readonly UserDto[];
   readonly assignees: readonly UserDto[]; readonly changes_count: number;
   readonly detailed_merge_status: string | null; readonly draft_notes_count: number | null;
@@ -152,14 +152,14 @@ export interface DiscussionsRevisionDto extends JsonObject { readonly discussion
  * threads arrives over several pages rather than as one rejected frame.
  */
 export interface DiscussionsPage extends DiscussionsResult { readonly snapshot_id: string; readonly resource: OpaqueHandle; readonly revision: DiscussionsRevisionDto; readonly cursor: number; readonly next_cursor: number | null; }
-export interface CommitDto { readonly sha: string; readonly short_sha: string; readonly title: string; readonly message: string; readonly author: UserDto; readonly created_at: string | null; readonly web_url: string; }
+export interface CommitDto { readonly sha: string; readonly short_sha: string; readonly title: string; readonly message: string; readonly author: UserDto; readonly created_at: string | null; readonly web_url: string | null; }
 export interface CommitsResult { readonly commits: readonly CommitDto[]; }
-export interface PipelineDto { readonly id: number; readonly status: string; readonly ref: string; readonly sha: string; readonly web_url: string; readonly source: string; readonly created_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; }
+export interface PipelineDto { readonly id: number; readonly status: string; readonly ref: string; readonly sha: string; readonly web_url: string | null; readonly source: string | null; readonly created_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; }
 export interface PipelineItemDto { readonly handle: OpaqueHandle; readonly value: PipelineDto; }
 export interface PipelinesResult { readonly pipelines: readonly PipelineItemDto[]; }
 export interface ListPipelinesParams { readonly repository: OpaqueHandle; readonly per_page?: number; }
 export interface ListReviewPipelinesParams { readonly review: OpaqueHandle; readonly per_page?: number; }
-export interface JobDto { readonly id: number; readonly name: string; readonly stage: string; readonly status: string; readonly web_url: string; readonly started_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; readonly allow_failure: boolean; }
+export interface JobDto { readonly id: number; readonly name: string; readonly stage: string | null; readonly status: string; readonly web_url: string | null; readonly started_at: string | null; readonly finished_at: string | null; readonly duration_seconds: number | null; readonly allow_failure: boolean; }
 export interface JobItemDto { readonly handle: OpaqueHandle; readonly value: JobDto; }
 export interface JobsResult { readonly jobs: readonly JobItemDto[]; }
 export interface LogRow { readonly text: string; }

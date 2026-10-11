@@ -2102,3 +2102,73 @@ async def test_get_mr_revision_reads_only_the_pull_request() -> None:
     assert detail.start_sha is None
     assert detail.changes_count == 3
     assert detail.approvals == ()
+
+
+class TestAbsentOptionalText:
+    """A forge's explicit null for an optional text keeps the empty string (#184).
+
+    The core models type these fields as text and spell "not provided" as the
+    empty string, so a null in the payload must not leak in as ``None``.
+    """
+
+    def test_job_and_run_without_optional_text(self) -> None:
+        client, _ = _make_github_client(lambda _: httpx.Response(200))
+
+        job = client._parse_job(
+            {
+                "id": 2,
+                "name": "build",
+                "status": "queued",
+                "workflow_name": None,
+                "html_url": None,
+            }
+        )
+        missing = client._parse_job({"id": 3, "name": "lint", "status": "queued"})
+        run = client._parse_workflow_run(
+            {
+                "id": 1,
+                "status": "queued",
+                "head_branch": "main",
+                "head_sha": "abc123",
+                "html_url": None,
+                "event": None,
+            }
+        )
+
+        assert (job.stage, job.web_url) == ("", "")
+        assert (missing.stage, missing.web_url) == ("", "")
+        assert (run.web_url, run.source) == ("", "")
+        assert (run.ref, run.sha) == ("main", "abc123")
+
+    def test_detail_without_merge_state(self) -> None:
+        client, _ = _make_github_client(lambda _: httpx.Response(200))
+
+        detail = client._parse_pr_detail(
+            _pr_api_json({"mergeable_state": None}), "acme/repo"
+        )
+
+        assert detail.merge_status == ""
+
+    @pytest.mark.asyncio
+    async def test_commit_without_link(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/repos/acme/repo/pulls/7/commits"
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "sha": "abc123def456",
+                        "commit": {"message": "Fix the build\n\nBody"},
+                        "author": None,
+                        "html_url": None,
+                    }
+                ],
+            )
+
+        client, http = _make_github_client(handler)
+        async with http:
+            commits = await client.list_mr_commits("acme/repo", 7)
+
+        assert [(commit.title, commit.web_url) for commit in commits] == [
+            ("Fix the build", "")
+        ]
