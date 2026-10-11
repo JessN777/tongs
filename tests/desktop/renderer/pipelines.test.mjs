@@ -496,12 +496,24 @@ test("log reconstruction enforces identity, revision, line, and text bounds", as
         revision: { sha256: "hash", byte_count: 99 },
       }),
   };
+  // Past the line limit the end of the log is kept, where a job reports
+  // its failure.
   const loaded = await loadLogPages("job", bridge, new QueryCoordinator(bridge));
-  assert.equal(loaded.lines[0], "one");
-  assert.equal(loaded.lines[1], "two");
   assert.equal(loaded.lines.length, 50_000);
+  assert.equal(loaded.lines[0], "x");
+  assert.equal(loaded.lines.at(-1), "x");
   assert.equal(loaded.partialError.code, "pagination_limit");
+  assert.match(loaded.partialError.message, /^Showing the end of this job log\./);
   assert.equal(sanitizeLogText("safe\u0000\u001b[31mred\u001b[0m"), "safe�red");
+
+  const small = {
+    cancelRead: async () => true,
+    openLog: () => read(logPage("job", 0, null, "one\r\n\u001b]0;title\u0007two\n")),
+    pageLog: () => assert.fail("a one-page log reads no further page"),
+  };
+  const whole = await loadLogPages("job", small, new QueryCoordinator(small));
+  assert.deepEqual([...whole.lines], ["one", "two"]);
+  assert.equal(whole.partialError, null);
 
   const inconsistent = {
     cancelRead: async () => true,
@@ -529,6 +541,31 @@ test("log reconstruction enforces identity, revision, line, and text bounds", as
       (error) => error.code === "revision_changed",
     );
   }
+});
+
+test("a log past the character limit keeps its end from a line start", async () => {
+  // Rows of 1 Mi characters: nine of them pass the 8 Mi character limit.
+  const row = (label) => `${label}${"y".repeat(1024 * 1024 - label.length - 1)}\n`;
+  const rows = Array.from({ length: 9 }, (_, index) => row(`row-${index}:`));
+  rows.push("the build failed here\n");
+  const bridge = {
+    cancelRead: async () => true,
+    openLog: () => read({ ...logPage("job", 0, 1, rows[0]) }),
+    pageLog: ({ cursor }) =>
+      read({
+        ...logPage("job", cursor, cursor + 1 < rows.length ? cursor + 1 : null, rows[cursor]),
+      }),
+  };
+  const loaded = await loadLogPages("job", bridge, new QueryCoordinator(bridge));
+  assert.equal(loaded.lines.at(-1), "the build failed here");
+  assert.equal(loaded.lines[0].startsWith("row-"), true);
+  assert.equal(loaded.lines.some((line) => line.startsWith("row-0:")), false);
+  assert.equal(
+    loaded.lines.reduce((total, line) => total + line.length + 1, 0) <= 8 * 1024 * 1024,
+    true,
+  );
+  assert.equal(loaded.partialError.code, "pagination_limit");
+  assert.match(loaded.partialError.message, /^Showing the end of this job log\./);
 });
 
 test("known pre-dispatch failures and ambiguous transport failures stay distinct", () => {

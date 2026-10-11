@@ -20,6 +20,7 @@ from tongs.forges.base import ForgeClient
 from tongs.forges.models import (
     CIStatus,
     ForgeHost,
+    JobLogTail,
     MRDetail,
     MRState,
     MRSummary,
@@ -195,6 +196,10 @@ class _FixtureSession:
             "literal <script>alert('inert')</script> remains text\n"
             "search-target mutation receipt\n"
         )
+
+    async def get_job_log_tail(self, job: JobRef, max_bytes: int) -> JobLogTail:
+        data = (await self.get_job_log(job)).encode()
+        return JobLogTail.from_bytes(data, len(data), max_bytes)
 
     async def clear_cache(self) -> None:
         self._client._record("clear_cache", REPOSITORY.project_path, 0)

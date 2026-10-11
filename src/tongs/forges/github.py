@@ -31,6 +31,7 @@ from tongs.forges.http import (
     paginate,
     request,
     request_bytes,
+    request_log_tail,
     request_page,
 )
 from tongs.forges.models import (
@@ -41,6 +42,7 @@ from tongs.forges.models import (
     ForgeMergeResult,
     ForgeMutationResult,
     InlineComment,
+    JobLogTail,
     MRDetail,
     MRPage,
     MRState,
@@ -1315,6 +1317,17 @@ class GitHubClient(ForgeClient):
         if response.status_code >= 400:
             raise map_http_error(response)
         return response.text
+
+    async def get_job_log_tail(
+        self, repo_path: str, job_id: int, max_bytes: int
+    ) -> JobLogTail:
+        """Stream a job log and keep its last ``max_bytes`` bytes."""
+        owner, repo = _split_repo_path(repo_path)
+        return await request_log_tail(
+            self._http,
+            f"/repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
+            max_bytes=max_bytes,
+        )
 
     async def retry_job(self, repo_path: str, job_id: int) -> None:
         owner, repo = _split_repo_path(repo_path)

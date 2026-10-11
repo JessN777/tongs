@@ -224,6 +224,9 @@ The available read declarations are:
 | `JOBS` | `jobs` |
 | `LOG` | `log` |
 
+A `log` read returns the same bounded log the desktop shows: a log over 8 MiB
+keeps its end, after a first line that names the full and shown sizes.
+
 These are read-only application service calls. The provider SDK does not expose
 `ForgeRegistry`, credentials, raw HTTP clients, the cache, or the Textual app.
 Forge writes continue through the application's normal command and confirmation

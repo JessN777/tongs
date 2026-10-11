@@ -16,6 +16,7 @@ from tongs.forges.http import (
     paginate,
     request,
     request_bytes,
+    request_log_tail,
     request_page,
 )
 from tongs.forges.models import (
@@ -26,6 +27,7 @@ from tongs.forges.models import (
     ForgeMergeResult,
     ForgeMutationResult,
     InlineComment,
+    JobLogTail,
     MRDetail,
     MRPage,
     MRState,
@@ -818,6 +820,17 @@ class GitLabClient(ForgeClient):
         if response.status_code >= 400:
             raise map_http_error(response)
         return response.text
+
+    async def get_job_log_tail(
+        self, repo_path: str, job_id: int, max_bytes: int
+    ) -> JobLogTail:
+        """Stream a job log and keep its last ``max_bytes`` bytes."""
+        project = _encode_project(repo_path)
+        return await request_log_tail(
+            self._http,
+            f"/projects/{project}/jobs/{job_id}/trace",
+            max_bytes=max_bytes,
+        )
 
     async def retry_job(self, repo_path: str, job_id: int) -> None:
         project = _encode_project(repo_path)

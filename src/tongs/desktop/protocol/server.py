@@ -87,7 +87,7 @@ from tongs.diff.context import GapPosition, file_gaps, verify_new_side
 from tongs.diff.conversion import convert_forge_changes
 from tongs.diff.models import DiffFile
 from tongs.errors import redact_credentials
-from tongs.forges.models import MRState, MRSummary, Pipeline, PipelineJob
+from tongs.forges.models import JobLogTail, MRState, MRSummary, Pipeline, PipelineJob
 from tongs.plugins.desktop import (
     DesktopCallContext,
     DesktopCancellation,
@@ -232,6 +232,18 @@ _DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 # leaves a store's SQLite worker thread running, which would keep the process
 # alive after it should have exited (#442).
 _FINAL_CLOSE_WAITS = 8
+# The most a job log snapshot retains, measured as the snapshot store measures
+# it (its JSON rows). A longer log keeps its end, which is where a failure
+# shows. A quarter of the store leaves room for the diffs and discussions
+# being read beside it, and the renderer's limit of 8 Mi characters never
+# cuts what is kept here again (#314).
+_MAX_LOG_SNAPSHOT_BYTES = MAX_SNAPSHOT_RETAINED_BYTES // 4
+# A cut can grow the note naming it and split rows differently, so the tail is
+# trimmed again a few times at most before the log is refused.
+_MAX_LOG_TRIMS = 8
+# Room for the truncation note's first line, whose sizes may grow by a few
+# digits after a further cut.
+_LOG_NOTE_ROOM = 128
 
 
 class AsyncByteWriter(Protocol):
@@ -1448,19 +1460,10 @@ class DesktopSidecarServer:
         )
         job_handle = _text(params, "job", max_length=100)
         job = self._handles.resolve(job_handle, HandleKind.JOB, JobRef)
-        text = await self._session.get_job_log(job)
-        encoded = text.encode("utf-8")
-        if len(encoded) > MAX_SNAPSHOT_RETAINED_BYTES:
-            raise ProtocolError(
-                ProtocolErrorCode.RESPONSE_TOO_LARGE,
-                "The job log exceeds the session retention limit.",
-            )
-        revision: JsonObject = {
-            "sha256": hashlib.sha256(encoded).hexdigest(),
-            "byte_count": len(encoded),
-        }
+        log = await self._session.get_job_log_tail(job, _MAX_LOG_SNAPSHOT_BYTES)
+        revision, entries = _log_snapshot(log, _MAX_LOG_SNAPSHOT_BYTES)
         snapshot_id = self._snapshots.create(
-            job_handle, revision, _log_entries(encoded), kind=_LOG_SNAPSHOT
+            job_handle, revision, entries, kind=_LOG_SNAPSHOT
         )
         return self._snapshot_page_wire(
             self._snapshots.page(
@@ -2318,6 +2321,65 @@ def _comment_wire(comment: JsonObject) -> JsonObject:
             for reply in cast(list[JsonValue], comment["replies"])
         ],
     }
+
+
+def _log_snapshot(
+    log: JobLogTail, budget: int
+) -> tuple[JsonObject, tuple[JsonObject, ...]]:
+    """Return the revision and rows of a log snapshot within ``budget``.
+
+    ``budget`` is measured as ``SnapshotStore.create`` measures a snapshot, so
+    a log that passes here is never refused by the store. A log that is
+    already cut, or whose escaped rows outgrow the budget, keeps its end from
+    a line boundary, after a first line that names the sizes.
+    """
+    text = log.text
+    truncated = log.truncated
+    for _ in range(_MAX_LOG_TRIMS):
+        shown = (
+            _log_truncation_note(text, log.total_bytes) + text if truncated else text
+        )
+        encoded = shown.encode("utf-8")
+        revision: JsonObject = {
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "byte_count": len(encoded),
+        }
+        entries = _log_entries(encoded)
+        excess = retained_size(revision, entries) - budget
+        if excess <= 0:
+            return revision, entries
+        # Each character adds at least one byte to the measure, so dropping
+        # the excess plus the note's room in characters makes enough space.
+        text = _log_from_line_start(text[excess + _LOG_NOTE_ROOM :])
+        truncated = True
+    raise ProtocolError(
+        ProtocolErrorCode.RESPONSE_TOO_LARGE,
+        "The job log exceeds the session retention limit.",
+    )
+
+
+def _log_truncation_note(text: str, total_bytes: int) -> str:
+    shown = len(text.encode("utf-8"))
+    total = max(total_bytes, shown)
+    return (
+        f"[tongs] This job log is {_byte_size(total)}. Showing the last "
+        f"{_byte_size(shown)}; earlier output is left out.\n"
+    )
+
+
+def _byte_size(count: int) -> str:
+    if count >= 1024 * 1024:
+        return f"{count / (1024 * 1024):.1f} MiB"
+    if count >= 1024:
+        return f"{count / 1024:.1f} KiB"
+    return f"{count} bytes"
+
+
+def _log_from_line_start(text: str) -> str:
+    newline = text.find("\n")
+    if newline == -1 or newline == len(text) - 1:
+        return text
+    return text[newline + 1 :]
 
 
 def _log_entries(encoded: bytes) -> tuple[JsonObject, ...]:

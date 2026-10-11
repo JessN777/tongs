@@ -28,6 +28,7 @@ from tongs.desktop.protocol.server import (
     _recovery_notices,
 )
 from tongs.desktop.protocol.state import HandleKind
+from tongs.forges.models import JobLogTail
 from tongs.plugins.desktop import (
     DesktopCallContext,
     DesktopCancellation,
@@ -151,6 +152,10 @@ class _FakeSession:
 
     async def get_job_log(self, _job: JobRef) -> str:
         return self.log
+
+    async def get_job_log_tail(self, _job: JobRef, max_bytes: int) -> JobLogTail:
+        data = self.log.encode()
+        return JobLogTail.from_bytes(data, len(data), max_bytes)
 
 
 def _registry() -> DesktopPluginRegistry:

@@ -216,6 +216,70 @@ class PipelineJob:
     allow_failure: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class JobLogTail:
+    """The end of a job log, kept within a byte budget.
+
+    ``text`` holds at most the budget in UTF-8 bytes. ``total_bytes`` is the
+    size of the whole log as the forge sent it, and ``truncated`` says whether
+    earlier output was left out. A truncated tail starts on a line boundary
+    unless its first line alone is longer than the budget.
+    """
+
+    text: str
+    total_bytes: int
+    truncated: bool
+
+    @classmethod
+    def from_bytes(
+        cls,
+        data: bytes,
+        total_bytes: int,
+        max_bytes: int,
+        encoding: str = "utf-8",
+    ) -> JobLogTail:
+        """Decode the end of ``data``, cut to ``max_bytes`` UTF-8 bytes.
+
+        ``data`` is the end of a log of ``total_bytes`` bytes; one byte more
+        than the budget lets a cut that falls on a line start keep that line.
+        Undecodable bytes become replacement characters, and the cut is
+        measured again after decoding, so the text never passes ``max_bytes``
+        UTF-8 bytes whatever the source encoding.
+        """
+        if max_bytes < 0:
+            raise ValueError("max_bytes must not be negative")
+        total_bytes = max(total_bytes, len(data))
+        truncated = total_bytes > max_bytes
+        # A cut right after a newline already starts a line. The byte before
+        # the cut is known only when ``data`` holds more than the budget.
+        at_line_start = False
+        if len(data) > max_bytes:
+            cut = len(data) - max_bytes
+            at_line_start = data[cut - 1 : cut] == b"\n"
+            data = data[cut:]
+        try:
+            text = data.decode(encoding, errors="replace")
+        except LookupError:
+            text = data.decode("utf-8", errors="replace")
+        if truncated and not at_line_start:
+            text = _from_line_start(text)
+        encoded_length = len(text.encode("utf-8"))
+        if encoded_length > max_bytes:
+            # Each character takes at least one byte, so dropping the excess
+            # in characters always fits.
+            text = _from_line_start(text[encoded_length - max_bytes :])
+            truncated = True
+        return cls(text, total_bytes, truncated)
+
+
+def _from_line_start(text: str) -> str:
+    """Drop a partial first line, unless it is the only line there is."""
+    newline = text.find("\n")
+    if newline == -1 or newline == len(text) - 1:
+        return text.lstrip("�")
+    return text[newline + 1 :]
+
+
 @dataclass(frozen=True)
 class Commit:
     """A commit in an MR/PR."""
