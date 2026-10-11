@@ -978,6 +978,127 @@ async def test_a_cancel_mid_generate_keeps_nothing(tmp_path: Path) -> None:
         assert wired.server._generated_snapshots == {}
 
 
+# -- releasing generated diffs the renderer stopped reading (#431) -----------
+
+
+async def _page(wired: _Wired, snapshot: object, cursor: int = 0) -> JsonObject:
+    return await wired.wire.call(
+        "diff.page", {"snapshot": snapshot, "resource": wired.review, "cursor": cursor}
+    )
+
+
+async def _page_error(wired: _Wired, snapshot: object) -> JsonObject:
+    return await wired.wire.error(
+        "diff.page", {"snapshot": snapshot, "resource": wired.review, "cursor": 0}
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", ["generate", "page"])
+async def test_a_cancel_for_an_answered_read_releases_the_generated_diff(
+    tmp_path: Path, cancelled: str
+) -> None:
+    async for wired in _start(tmp_path, _serve_big()):
+        page = await wired.open(layout="split")
+        generate_id = wired.wire.send(
+            "diff.generate",
+            {"review": wired.review, "snapshot": page["snapshot_id"], "file_index": 1},
+        )
+        generated = cast(
+            JsonObject, (await wired.wire.writer.response(generate_id))["result"]
+        )
+        snapshot = cast(str, generated["snapshot_id"])
+        assert generated["next_cursor"] is not None
+        page_id = wired.wire.send(
+            "diff.page",
+            {
+                "snapshot": snapshot,
+                "resource": wired.review,
+                "cursor": generated["next_cursor"],
+            },
+        )
+        more = await wired.wire.writer.response(page_id)
+        assert "result" in more
+        retained = wired.server._snapshots._retained_rows
+
+        # The renderer gave up between pages: its cancel arrives after the reply.
+        wired.wire.cancel(generate_id if cancelled == "generate" else page_id)
+
+        error = await _page_error(wired, snapshot)
+        assert error["code"] == "snapshot_expired"
+        assert wired.server._generated_snapshots == {}
+        assert wired.server._snapshots._retained_rows < retained
+        # The review's own diff is untouched.
+        await _page(wired, page["snapshot_id"])
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_for_another_request_keeps_the_generated_diff(
+    tmp_path: Path,
+) -> None:
+    async for wired in _start(tmp_path, _serve_big()):
+        open_id = wired.wire.send(
+            "diff.open", {"review": wired.review, "layout": "split"}
+        )
+        page = cast(JsonObject, (await wired.wire.writer.response(open_id))["result"])
+        generated = await _generate(wired, page["snapshot_id"])
+        snapshot = cast(str, generated["snapshot_id"])
+
+        wired.wire.cancel(open_id)
+        wired.wire.cancel("request-unknown")
+
+        second = await _page(wired, snapshot)
+        assert second["next_cursor"] is not None
+        assert list(wired.server._generated_snapshots) == [snapshot]
+
+
+@pytest.mark.asyncio
+async def test_a_newer_diff_releases_generations_of_diffs_no_longer_on_screen(
+    tmp_path: Path,
+) -> None:
+    async for wired in _start(tmp_path, _serve_big()):
+        page = await wired.open(layout="split")
+        generated = await _generate(wired, page["snapshot_id"])
+        snapshot = cast(str, generated["snapshot_id"])
+        assert generated["next_cursor"] is not None
+
+        # A layout switch names the diff on screen, which may still be
+        # reading the generated file while the new layout loads.
+        switched = await wired.open(layout="unified", from_snapshot=page["snapshot_id"])
+        assert (await _page(wired, snapshot))["next_cursor"] is not None
+        # Another review's diff leaves this review's generation alone.
+        await wired.wire.call("diff.open", {"review": wired.reviews[1]})
+        assert list(wired.server._generated_snapshots) == [snapshot]
+
+        # The next open of the review comes after the switched diff took over.
+        await wired.open(layout="split", from_snapshot=switched["snapshot_id"])
+
+        error = await _page_error(wired, snapshot)
+        assert error["code"] == "snapshot_expired"
+        assert wired.server._generated_snapshots == {}
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_keeps_the_generation_on_screen_until_the_next_one(
+    tmp_path: Path,
+) -> None:
+    async for wired in _start(tmp_path, _serve_big()):
+        page = await wired.open(layout="split")
+        generated = await _generate(wired, page["snapshot_id"])
+        snapshot = cast(str, generated["snapshot_id"])
+
+        # A Refresh names no snapshot: the last diff opened is the one on
+        # screen, so its generation may still be paging.
+        await wired.open(layout="split")
+        assert (await _page(wired, snapshot))["next_cursor"] is not None
+
+        await wired.open(layout="split")
+
+        error = await _page_error(wired, snapshot)
+        assert error["code"] == "snapshot_expired"
+        assert wired.server._generated_snapshots == {}
+
+
 # -- state and cache --------------------------------------------------------
 
 

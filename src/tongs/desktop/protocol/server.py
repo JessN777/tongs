@@ -153,6 +153,11 @@ _MAX_SNAPSHOT_ID_LENGTH = 100
 _CONTEXT_ROW_VALUES = 6
 # Generated diff snapshots kept on record to release after their last page.
 _MAX_GENERATED_SNAPSHOTS = 64
+# Requests that read a generated diff snapshot, kept so a cancel that arrives
+# for one, even after its reply, releases the snapshot.
+_MAX_GENERATED_REQUESTS = 256
+# The last diff snapshot opened for each review, kept for this many reviews.
+_MAX_LATEST_DIFFS = 256
 _CONTEXT_PARAMS = frozenset({"review", "snapshot", "file_index", "new_start", "count"})
 _GENERATE_PARAMS = frozenset({"review", "snapshot", "file_index"})
 
@@ -258,6 +263,14 @@ class _Operation:
 class _PendingRequest:
     task: asyncio.Task[None]
     context: RequestContext
+
+
+@dataclass(frozen=True, slots=True)
+class _GeneratedSnapshot:
+    """A generated diff snapshot: its review and the diff it came from."""
+
+    review_handle: str
+    source: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,8 +436,14 @@ class DesktopSidecarServer:
         # the read the reader sees instead of reading the forge again.
         self._diff_cache = ConvertedDiffCache()
         # One-file snapshots of locally generated diffs, released after their
-        # last page so they never linger next to the review's own diff.
-        self._generated_snapshots: OrderedDict[str, None] = OrderedDict()
+        # last page so they never linger next to the review's own diff. One
+        # the renderer stops reading is released when a cancel arrives for
+        # any request that read it, or when its review opens a newer diff.
+        self._generated_snapshots: OrderedDict[str, _GeneratedSnapshot] = OrderedDict()
+        self._generated_requests: OrderedDict[str, str] = OrderedDict()
+        # The diff snapshot each review last opened, which the renderer shows
+        # until a newer open finishes.
+        self._latest_diffs: OrderedDict[str, str] = OrderedDict()
         self._assets = AssetCatalog()
         self._operations: dict[str, _Operation] = {}
         self._pending: dict[str, _PendingRequest] = {}
@@ -680,6 +699,10 @@ class DesktopSidecarServer:
         context = RequestContext(
             frame.request_id, DesktopCancellation(), mutation=operation.mutation
         )
+        if frame.method == "diff.page":
+            snapshot = frame.params.get("snapshot")
+            if isinstance(snapshot, str) and snapshot in self._generated_snapshots:
+                self._remember_generated_request(frame.request_id, snapshot)
         task = asyncio.create_task(self._serve(frame, operation, context))
         self._pending[frame.request_id] = _PendingRequest(task, context)
 
@@ -737,6 +760,11 @@ class DesktopSidecarServer:
                 self._pending.pop(frame.request_id, None)
 
     def _cancel(self, request_id: str) -> None:
+        generated = self._generated_requests.pop(request_id, None)
+        if generated is not None:
+            # The renderer stopped reading this generated diff, so it goes
+            # now instead of waiting for the store to need the room.
+            self._release_generated(generated)
         pending = self._pending.get(request_id)
         if pending is None:
             return
@@ -980,6 +1008,13 @@ class DesktopSidecarServer:
         )
         review_handle = _text(params, "review", max_length=100)
         review = self._handles.resolve(review_handle, HandleKind.REVIEW, ReviewRef)
+        # The diff on screen may still be reading a generated file while this
+        # one loads, so only generations from older diffs go now. A layout
+        # switch names the diff on screen; a Refresh replaces the last one.
+        on_screen = (
+            source if source is not None else self._latest_diffs.get(review_handle)
+        )
+        self._release_review_generated(review_handle, keep=on_screen)
         cached = (
             None if source is None else self._diff_cache.lookup(review_handle, source)
         )
@@ -1005,6 +1040,10 @@ class DesktopSidecarServer:
             )
         else:
             self._diff_cache.remember(review_handle, snapshot_id, layout=layout)
+        self._latest_diffs[review_handle] = snapshot_id
+        self._latest_diffs.move_to_end(review_handle)
+        while len(self._latest_diffs) > _MAX_LATEST_DIFFS:
+            self._latest_diffs.popitem(last=False)
         return self._snapshot_page_wire(
             self._snapshots.page(
                 snapshot_id,
@@ -1127,7 +1166,7 @@ class DesktopSidecarServer:
         return rows
 
     async def _diff_generate(
-        self, params: JsonObject, _context: RequestContext
+        self, params: JsonObject, context: RequestContext
     ) -> object:
         """Generate one truncated file's diff locally and return its first page.
 
@@ -1136,7 +1175,9 @@ class DesktopSidecarServer:
         of the snapshot it came from, into a new diff snapshot that is read
         with ``diff.page`` and released after its last page. The snapshot is
         created only when the store has room for it without evicting another
-        one. A cancel frame stops the generation and keeps nothing.
+        one. A cancel frame stops the generation and keeps nothing. A cancel
+        for this request or any of its pages, or a newer diff of the review
+        once this one is no longer on screen, releases the snapshot early.
         """
         _require_params(params, allowed=_GENERATE_PARAMS, required=_GENERATE_PARAMS)
         review_handle = _text(params, "review", max_length=100)
@@ -1165,9 +1206,12 @@ class DesktopSidecarServer:
             projection=layout.value,
             kind=_DIFF_SNAPSHOT,
         )
-        self._generated_snapshots[snapshot_id] = None
+        self._generated_snapshots[snapshot_id] = _GeneratedSnapshot(
+            review_handle, snapshot
+        )
         while len(self._generated_snapshots) > _MAX_GENERATED_SNAPSHOTS:
             self._generated_snapshots.popitem(last=False)
+        self._remember_generated_request(context.request_id, snapshot_id)
         try:
             page = self._snapshots.page(
                 snapshot_id, review_handle, 0, _DIFF_PAGE_ITEMS, kind=_DIFF_SNAPSHOT
@@ -1216,6 +1260,20 @@ class DesktopSidecarServer:
         if snapshot_id in self._generated_snapshots:
             del self._generated_snapshots[snapshot_id]
             self._snapshots.expire(snapshot_id)
+
+    def _release_review_generated(
+        self, review_handle: str, *, keep: str | None
+    ) -> None:
+        """Release a review's generated snapshots, except those from ``keep``."""
+        for snapshot_id, generated in tuple(self._generated_snapshots.items()):
+            if generated.review_handle == review_handle and generated.source != keep:
+                self._release_generated(snapshot_id)
+
+    def _remember_generated_request(self, request_id: str, snapshot_id: str) -> None:
+        self._generated_requests[request_id] = snapshot_id
+        self._generated_requests.move_to_end(request_id)
+        while len(self._generated_requests) > _MAX_GENERATED_REQUESTS:
+            self._generated_requests.popitem(last=False)
 
     async def _discussions_list(
         self, params: JsonObject, _context: RequestContext
@@ -1778,6 +1836,8 @@ class DesktopSidecarServer:
         self._snapshots.clear()
         self._diff_cache.clear()
         self._generated_snapshots.clear()
+        self._generated_requests.clear()
+        self._latest_diffs.clear()
         self._handles.clear()
         self._assets.clear()
         await self._events.close()
