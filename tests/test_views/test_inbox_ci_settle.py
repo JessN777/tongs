@@ -137,8 +137,9 @@ def looked_up_keys(client: LazyForgeClient) -> list[str]:
 async def test_a_streaming_first_load_looks_up_one_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A longer debounce keeps a slow test machine from pausing the stream.
-    monkeypatch.setattr(inbox_module, "_CI_WINDOW_DEBOUNCE_SECONDS", 0.5)
+    # While the test feeds the stream, a debounce far longer than any gap
+    # between arrivals means a slow test machine never looks like a pause.
+    monkeypatch.setattr(inbox_module, "_CI_WINDOW_DEBOUNCE_SECONDS", 30.0)
     projects = [f"acme/r{index:02d}" for index in range(12)]
     client = GatedListClient(stacked(projects, 60), page_size=60)
     # Every repository read may start at once, so the test alone sets the
@@ -152,10 +153,15 @@ async def test_a_streaming_first_load_looks_up_one_window(
         # Oldest first, each well within the debounce after the last, so
         # every repository puts its rows on top of the list.
         for count, project in enumerate(projects, start=1):
+            last = count == len(projects)
+            if last:
+                # The last arrival ends the stream; its lookup may now run.
+                monkeypatch.setattr(inbox_module, "_CI_WINDOW_DEBOUNCE_SECONDS", 0.1)
             client.arrive.setdefault(project, asyncio.Event()).set()
             await wait_until(pilot, lambda count=count: table.row_count == count * 60)
-            await pilot.pause(0.02)
-            assert not client.ci_calls
+            if not last:
+                await pilot.pause(0.02)
+                assert not client.ci_calls
         await wait_until(pilot, lambda: not app.screen.loading_all_open)
         await wait_until(
             pilot, lambda: bool(client.ci_calls) and filled(table, window_keys(table))
