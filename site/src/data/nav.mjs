@@ -86,6 +86,7 @@ export const groups = [
     blurb: 'Releases, known issues and how to contribute.',
     items: [
       { label: 'Releases', slug: 'releases' },
+      { label: 'v1.1.0', slug: 'releases/v1.1.0' },
       { label: 'v1.0.5', slug: 'releases/v1.0.5' },
       { label: 'v1.0.4', slug: 'releases/v1.0.4' },
       { label: 'v1.0.3', slug: 'releases/v1.0.3' },
