@@ -58,8 +58,12 @@ class TongsCommandProvider(Provider):
                 app.notify("Cache cleared")
 
         commands = [
-            ("Repos", "Open repository list", lambda: app.push_screen("repo_list")),
-            ("Inbox", "Open MR inbox", lambda: app.push_screen("inbox")),
+            (
+                "Repos",
+                "Open repository list",
+                lambda: app.open_screen("repo_list"),
+            ),
+            ("Inbox", "Open MR inbox", lambda: app.open_screen("inbox")),
             ("Clear Cache", "Clear all cached API responses", _clear_cache),
             ("Help", "Show the keybindings panel", lambda: app.action_help()),
         ]

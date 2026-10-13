@@ -226,6 +226,27 @@ class MRTable(DataTable):
         else:
             self._keep_cursor_on(selected)
 
+    def remove_mr(self, mr: MRSummary) -> bool:
+        """Drop one MR's row in place, keeping the cursor on a nearby row.
+
+        Returns whether the MR was listed. The row that takes the removed
+        one's place gets the cursor, or the last row when it was last, so a
+        merged or closed MR leaving the list keeps the user's place.
+        """
+        key = mr_row_key(mr)
+        if key not in self._mr_data:
+            return False
+        held = self._selected_row_key()
+        index = self.get_row_index(key)
+        self._mr_data.pop(key)
+        self._ci_pending.discard(key)
+        self.remove_row(key)
+        if held is not None and held in self._mr_data:
+            self._keep_cursor_on(held)
+        elif self.row_count:
+            self.move_cursor(row=min(index, self.row_count - 1))
+        return True
+
     def _sorted(self) -> list[MRSummary]:
         return sort_mrs(list(self._mr_data.values()), self._sort_key, self._ci_pending)
 

@@ -343,9 +343,10 @@ async def _wait_until(
                 await app.workers.wait_for_complete()
 
 
-def _app(tmp_path: Path) -> tuple[TongsApp, _Forge]:
+def _app(tmp_path: Path, forge: _Forge | None = None) -> tuple[TongsApp, _Forge]:
     host = ForgeHost("github.com", ForgeType.GITHUB, "https://api.github.com")
-    forge = _Forge(host)
+    if forge is None:
+        forge = _Forge(host)
     registry = _Registry(forge)
     remote = Remote(
         "origin",

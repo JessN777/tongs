@@ -254,6 +254,21 @@ class PipelinePanel(Widget, can_focus=True):
         self._saved_job_idx: int = 0
         self._job_card_map: dict[int, int] = {}
 
+    @property
+    def view_level(self) -> int:
+        """How far the user has drilled in: 0 pipelines, 1 jobs, 2 one log."""
+        return self._view_level
+
+    @property
+    def current_pipeline(self) -> Pipeline | None:
+        """The pipeline the jobs list is showing, when drilled in."""
+        return self._current_pipeline
+
+    @property
+    def current_job(self) -> PipelineJob | None:
+        """The job whose log is showing, when one is open."""
+        return self._current_job
+
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="pipeline-list-scroll")
         yield VerticalScroll(id="job-list-scroll")

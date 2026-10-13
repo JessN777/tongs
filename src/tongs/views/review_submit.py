@@ -289,12 +289,31 @@ class ReviewSubmitScreen(ModalScreen[ReviewSubmitAction | None]):
             help_text = "Ctrl+S submit | e edit | x remove | D discard (destructive actions require two presses)"
         self.query_one("#review-submit-help", Static).update(Content(help_text))
 
-    def action_close(self) -> None:
+    def _dirty(self) -> bool:
+        """Does the dialog hold summary or verdict changes the draft lacks?"""
         body = self.query_one("#review-submit-body", TextArea).text
-        if (
-            body != self.draft.body
-            or self._verdict != (self.draft.verdict or DraftVerdict.COMMENT)
-        ) and not self._confirm(
+        return body != self.draft.body or self._verdict != (
+            self.draft.verdict or DraftVerdict.COMMENT
+        )
+
+    def prepare_leave(self) -> bool:
+        """Say whether this dialog may be left now, keeping unsaved text safe.
+
+        Escape asks for a second press before discarding a changed summary
+        or verdict; a palette screen command refuses the same way instead of
+        dropping the dialog and its text without that confirmation.
+        """
+        if not self._dirty():
+            return True
+        self.notify(
+            "Unsaved summary or verdict changes. Press Esc twice to discard "
+            "them, or submit, before leaving.",
+            severity="warning",
+        )
+        return False
+
+    def action_close(self) -> None:
+        if self._dirty() and not self._confirm(
             "close", "Press Esc again to discard unsaved summary or verdict changes."
         ):
             return

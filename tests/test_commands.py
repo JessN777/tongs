@@ -29,8 +29,8 @@ def _screen(screen_cls: type | None, *, draft: bool) -> MagicMock:
 
 
 _GLOBAL = [
-    ("Repos", "app", call.push_screen("repo_list")),
-    ("Inbox", "app", call.push_screen("inbox")),
+    ("Repos", "app", call.open_screen("repo_list")),
+    ("Inbox", "app", call.open_screen("inbox")),
     ("Clear Cache", "app", call.cache.clear()),
     ("Help", "app", call.action_help()),
     ("Plugin Command", "plugin", call()),

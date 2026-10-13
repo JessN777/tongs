@@ -34,6 +34,7 @@ from tongs.services.session import (
 from tongs.state.app_state import MRFilter
 from tongs.tui_services import TUIServiceAdapter
 from tongs.views.inbox import InboxScreen
+from tongs.views.leave_guard import LeaveGuard
 from tongs.views.repo_list import RepoListScreen
 from tongs.widgets.ascii import (
     ASCII_CLASS,
@@ -272,6 +273,28 @@ class TongsApp(App):
                 providers=[ThemeProvider], placeholder=THEME_PLACEHOLDER
             )
         )
+
+    def open_screen(self, screen_name: str) -> None:
+        """Show a named screen without stacking a second copy of it.
+
+        The name resolves to the one installed instance, so a
+        repository-scoped inbox never stands in for the main one. The screen
+        on top stays put, one deeper in the stack is popped back to, and one
+        that is not on the stack is pushed. Popping back asks every screen
+        above the target, topmost first, to agree to leave, so an open dialog
+        or MR detail that would lose work keeps the app where it is.
+        """
+        target = self.get_screen(screen_name)
+        if self.screen is target:
+            return
+        stack = self.screen_stack
+        if target not in stack:
+            self.push_screen(target)
+            return
+        for screen in reversed(stack[stack.index(target) + 1 :]):
+            if isinstance(screen, LeaveGuard) and not screen.prepare_leave():
+                return
+        target.pop_until_active()
 
     async def on_mount(self) -> None:
         self.apply_ascii_mode()

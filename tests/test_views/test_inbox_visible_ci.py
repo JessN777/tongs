@@ -20,6 +20,7 @@ from pathlib import Path
 import httpx
 import pytest
 from textual.pilot import Pilot
+from textual.widgets import TabbedContent
 
 import tongs.services.session as session_module
 import tongs.views.inbox as inbox_module
@@ -568,7 +569,7 @@ async def test_the_added_count_leaves_the_status_line(
 
 
 @pytest.mark.asyncio
-async def test_a_repository_refresh_clears_the_load_more_offer(
+async def test_a_repository_refresh_reloads_the_all_open_tab_in_place(
     tmp_path: Path,
 ) -> None:
     client = AllOpenOnlyClient(
@@ -580,12 +581,19 @@ async def test_a_repository_refresh_clears_the_load_more_offer(
         await settle(app)
         await open_all_open(pilot, app, 2)
         assert status_text(app).endswith("more to load (m)")
+        reads = len(client.page_reads)
 
-        # The background repository scan finished.
+        # The background repository scan finished. The tab the user is
+        # reading stays active and reloads, so the offer is recomputed from
+        # the fresh read rather than cleared by a jump back to My Reviews.
         app.screen.on_repositories_refreshed(app.repository_generation + 1)
+        table = app.screen.query_one("#all-open-table", MRTable)
+        await wait_until(pilot, lambda: len(client.page_reads) == reads + 1)
         await settle(app)
-        assert "more to load" not in status_text(app)
-        assert app.screen.check_action("load_more", ()) is False
+        assert app.screen.query_one(TabbedContent).active == "all-open"
+        assert table.row_count == 2
+        assert status_text(app).endswith("more to load (m)")
+        assert app.screen.check_action("load_more", ()) is True
 
 
 @pytest.mark.asyncio
