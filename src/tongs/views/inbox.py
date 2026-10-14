@@ -7,6 +7,7 @@ from collections.abc import Iterable, Sequence
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from typing import ClassVar
 
 from rich.markup import escape
@@ -41,6 +42,21 @@ _TAB_TABLES = {
     "all-open": "#all-open-table",
 }
 _TABLE_TABS = {table.removeprefix("#"): tab_id for tab_id, table in _TAB_TABLES.items()}
+
+
+class ListsChange(str, Enum):
+    """What an MR detail changed in the lists its inbox shows.
+
+    ``REVIEWED`` changed only the viewer's own review state, which the
+    personal lists read and All Open does not. ``CLOSED`` merged or closed
+    the MR with a known outcome, so it left the open lists.
+    ``MAYBE_CLOSED`` merged or closed it with an unknown outcome, so the
+    lists re-read because the MR may still be open.
+    """
+
+    REVIEWED = "reviewed"
+    CLOSED = "closed"
+    MAYBE_CLOSED = "maybe_closed"
 
 
 # CI lookups in flight per tab and host: ``max_parallel``, the host's request
@@ -197,7 +213,55 @@ class InboxScreen(Screen):
                 table.clear()
         if not self.scoped_repo and not self.app.repos:
             self.notify("[dim]No forges discovered yet[/]")
-        self.action_focus_tab("reviews")
+        # Stay on the tab the user is reading; each one reloads when it is
+        # next shown, or right away when it is the active one.
+        self.action_focus_tab(self.query_one(TabbedContent).active)
+
+    def invalidate(self, mr: MRSummary, change: ListsChange) -> None:
+        """Refresh the loaded lists after the MR this screen came from changed.
+
+        My Reviews and My MRs always read from the forge, so they re-read:
+        the tab on screen now, the others when each is next shown. All Open
+        pages through load more, so a merged or closed MR leaves by dropping
+        its row in place, keeping the pages and the cursor where the user
+        left them; when even the outcome is unknown the tab re-reads past
+        the list cache instead, because the row may not have left the open
+        list and only the forge knows. An approve, unapprove, or submitted
+        review changes only the viewer's own review state, which the open
+        list does not show.
+        """
+        if change is ListsChange.CLOSED:
+            self._remove_all_open_row(mr)
+        elif change is ListsChange.MAYBE_CLOSED:
+            # A read still running would leave its bookkeeping half done
+            # while the re-read replaces the rows, so it stops first, the
+            # same way the closed branch stops one.
+            self._stop_all_open()
+            self._loaded_tabs.discard("all-open")
+        self._loaded_tabs.discard("reviews")
+        self._loaded_tabs.discard("my-mrs")
+        active = self.query_one(TabbedContent).active
+        if active in _TAB_TABLES and active not in self._loaded_tabs:
+            self._loaded_tabs.add(active)
+            # An unknown merge or close outcome is exactly what the list
+            # cache cannot answer, so that re-read goes past it.
+            self._load_tab(active, fresh=change is ListsChange.MAYBE_CLOSED)
+
+    def _remove_all_open_row(self, mr: MRSummary) -> None:
+        """Drop a merged or closed MR's row from All Open in place.
+
+        The pages load more added and the cursor stay where they are. A read
+        still running is stopped first, or its bookkeeping would leave the
+        "load more" offer stuck half done.
+        """
+        self._stop_all_open()
+        table = self.query_one("#all-open-table", MRTable)
+        if not table.remove_mr(mr):
+            return
+        # Moving the cursor to a nearby row is this removal's doing, not the
+        # user's, so it must not read as a request to load more.
+        self._highlighted["all-open-table"] = table.selected_row_key()
+        self._set_all_open_status(self._all_open_summary(table))
 
     def action_refresh(self) -> None:
         """Reload the current tab from the forge, past the list cache."""
@@ -219,7 +283,7 @@ class InboxScreen(Screen):
         if self.scoped_repo:
             self.app.pop_screen()
         else:
-            self.app.push_screen("repo_list")
+            self.app.open_screen("repo_list")
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated

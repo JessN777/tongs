@@ -60,6 +60,7 @@ from tongs.state.drafts import (
     new_reply_comment,
 )
 from tongs.tui_services import TUIDiffResult, TUIDraftTarget
+from tongs.views.inbox import InboxScreen, ListsChange
 from tongs.views.review_submit import (
     ReviewSubmitAction,
     ReviewSubmitActionKind,
@@ -954,6 +955,9 @@ class MRDetailScreen(Screen):
             self._review_progress_by_draft.pop(draft_id, None)
             self.refresh_bindings()
             self.notify("Review submitted.")
+            # A submitted review ends the viewer's review request, which the
+            # personal lists read.
+            self._mark_lists_change(ListsChange.REVIEWED)
             self._diff_loaded = False
             self._discussions_loaded = False
             return
@@ -1008,7 +1012,7 @@ class MRDetailScreen(Screen):
     def _pipeline_drilled_in(self) -> bool:
         try:
             panel = self.query_one("#pipeline-panel", PipelinePanel)
-            return panel._view_level > 0
+            return panel.view_level > 0
         except NoMatches:
             return False
 
@@ -1037,45 +1041,56 @@ class MRDetailScreen(Screen):
         )
 
     def action_go_back(self) -> None:
-        editor = self.query_one("#comment-editor", CommentEditor)
-        if editor.display and editor._defer_close:
-            text = editor.query_one("#comment-input", TextArea).text.strip()
-            if text:
-                self.notify(
-                    "Save or explicitly discard the draft editor text before leaving.",
-                    severity="warning",
-                )
-                return
+        # Drilling out of a pipeline stays on this screen, so it unwinds
+        # first and only leaving is refused.
         try:
             panel = self.query_one("#pipeline-panel", PipelinePanel)
-            if panel._view_level > 0:
+            if panel.view_level > 0:
                 panel.action_drill_out()
                 return
         except NoMatches:
             pass
-        # Leaving cancels this screen's workers, and a cancelled submission
-        # records an unknown outcome for a write the forge may still finish.
-        # Drilling out of a pipeline stays on this screen, so only leaving is
-        # refused.
+        if self.prepare_leave():
+            self.app.pop_screen()
+
+    def prepare_leave(self) -> bool:
+        """Say whether this screen may leave now, and refresh the inboxes.
+
+        Leaving cancels this screen's workers, and a cancelled submission
+        records an unknown outcome for a write the forge may still finish,
+        so a submission or draft change still running, or unsaved text in
+        the open comment editor, refuses. When the MR changed something, each
+        inbox still on the stack is told to refresh, so none keeps showing
+        the MR as open. The caller pops this screen only when this returns
+        True, whether it leaves by Escape or by a palette screen command.
+        """
+        editor = self.query_one("#comment-editor", CommentEditor)
+        if editor.display:
+            text = editor.query_one("#comment-input", TextArea).text.strip()
+            if text:
+                self.notify(
+                    "Save or explicitly discard the open editor text before leaving.",
+                    severity="warning",
+                )
+                return False
         if self._submission_in_flight():
             self.notify(
                 "Submission in progress. Wait for it to finish before leaving.",
                 severity="warning",
             )
-            return
+            return False
         if self._draft_busy:
             self.notify(
                 "A review draft change is in progress. Wait for it to finish "
                 "before leaving.",
                 severity="warning",
             )
-            return
-        screen_stack = self.app.screen_stack
-        if len(screen_stack) >= 2:
-            parent = screen_stack[-2]
-            if hasattr(parent, "_loaded_tabs"):
-                parent._loaded_tabs.clear()
-        self.app.pop_screen()
+            return False
+        if self._lists_change is not None:
+            for screen in self.app.screen_stack:
+                if isinstance(screen, InboxScreen):
+                    screen.invalidate(self.mr_summary, self._lists_change)
+        return True
 
     def action_focus_tab(self, tab_id: str) -> None:
         tabbed = self.query_one(TabbedContent)
@@ -1473,8 +1488,8 @@ class MRDetailScreen(Screen):
             self._finish_mutation(intent)
             self.notify("[green]Job cancelled[/]")
             panel = self.query_one("#pipeline-panel", PipelinePanel)
-            if panel._current_pipeline is not None:
-                self._load_pipeline_jobs(panel._current_pipeline)
+            if panel.current_pipeline is not None:
+                self._load_pipeline_jobs(panel.current_pipeline)
         except asyncio.CancelledError:
             self._cancel_mutation(intent)
             raise
@@ -1511,8 +1526,8 @@ class MRDetailScreen(Screen):
             self._finish_mutation(intent)
             self.notify("[green]Job retried[/]")
             panel = self.query_one("#pipeline-panel", PipelinePanel)
-            if panel._current_pipeline is not None:
-                self._load_pipeline_jobs(panel._current_pipeline)
+            if panel.current_pipeline is not None:
+                self._load_pipeline_jobs(panel.current_pipeline)
         except asyncio.CancelledError:
             self._cancel_mutation(intent)
             raise
@@ -1589,7 +1604,18 @@ class MRDetailScreen(Screen):
             self._clear_pending_draft_editor()
         editor.open_general(defer_close=draft is not None)
 
-    _action_taken: bool = False
+    # What this screen changed in the lists its inboxes show, if anything.
+    _lists_change: ListsChange | None = None
+
+    def _mark_lists_change(self, change: ListsChange) -> None:
+        """Record what this screen changed in the lists its inboxes show.
+
+        A review change says nothing about whether the MR left the open
+        lists, so it never replaces a merge or close already recorded.
+        """
+        if change is ListsChange.REVIEWED and self._lists_change is not None:
+            return
+        self._lists_change = change
 
     def _check_open(self) -> bool:
         if self.mr_detail and self.mr_detail.state != MRState.OPEN:
@@ -1669,6 +1695,8 @@ class MRDetailScreen(Screen):
             )
             if not self._review_mutation_succeeded(outcome, "Approval"):
                 self._retain_unknown(intent)
+                # The approval may still have landed, so the lists re-read.
+                self._mark_lists_change(ListsChange.REVIEWED)
                 self._load_detail()
                 return
             self._finish_mutation(intent)
@@ -1676,7 +1704,7 @@ class MRDetailScreen(Screen):
                 f"[green]Approved !{self.mr_summary.number}[/]",
                 severity="information",
             )
-            self._action_taken = True
+            self._mark_lists_change(ListsChange.REVIEWED)
             self._load_detail()
         except asyncio.CancelledError:
             self._cancel_mutation(intent)
@@ -1694,6 +1722,8 @@ class MRDetailScreen(Screen):
             if receipt.outcome is MRActionOutcome.UNKNOWN:
                 self._retain_unknown(intent)
                 self._notify_unknown("Unapprove")
+                # The change may still have landed, so the lists re-read.
+                self._mark_lists_change(ListsChange.REVIEWED)
                 self._load_detail()
                 return
             self._finish_mutation(intent)
@@ -1701,7 +1731,7 @@ class MRDetailScreen(Screen):
                 f"[yellow]Approval revoked on !{self.mr_summary.number}[/]",
                 severity="information",
             )
-            self._action_taken = True
+            self._mark_lists_change(ListsChange.REVIEWED)
             self._load_detail()
         except asyncio.CancelledError:
             self._cancel_mutation(intent)
@@ -1719,6 +1749,8 @@ class MRDetailScreen(Screen):
             if receipt.outcome is MRActionOutcome.UNKNOWN:
                 self._retain_unknown(intent)
                 self._notify_unknown("Merge")
+                # The MR may or may not have left the open lists.
+                self._mark_lists_change(ListsChange.MAYBE_CLOSED)
                 self._load_detail()
                 return
             self._finish_mutation(intent)
@@ -1726,7 +1758,7 @@ class MRDetailScreen(Screen):
                 f"[green]Merged !{self.mr_summary.number}[/]",
                 severity="information",
             )
-            self._action_taken = True
+            self._mark_lists_change(ListsChange.CLOSED)
             self._load_detail()
         except asyncio.CancelledError:
             self._cancel_mutation(intent)
@@ -1744,6 +1776,8 @@ class MRDetailScreen(Screen):
             if receipt.outcome is MRActionOutcome.UNKNOWN:
                 self._retain_unknown(intent)
                 self._notify_unknown("Close")
+                # The MR may or may not have left the open lists.
+                self._mark_lists_change(ListsChange.MAYBE_CLOSED)
                 self._load_detail()
                 return
             self._finish_mutation(intent)
@@ -1751,7 +1785,7 @@ class MRDetailScreen(Screen):
                 f"[yellow]Closed !{self.mr_summary.number}[/]",
                 severity="information",
             )
-            self._action_taken = True
+            self._mark_lists_change(ListsChange.CLOSED)
             self._load_detail()
         except asyncio.CancelledError:
             self._cancel_mutation(intent)
@@ -2317,11 +2351,11 @@ class MRDetailScreen(Screen):
         tabbed = self.query_one(TabbedContent)
         if tabbed.active == "pipeline":
             panel = self.query_one("#pipeline-panel", PipelinePanel)
-            pipeline = panel._current_pipeline
-            job = panel._current_job
-            if panel._view_level == 2 and pipeline is not None and job is not None:
+            pipeline = panel.current_pipeline
+            job = panel.current_job
+            if panel.view_level == 2 and pipeline is not None and job is not None:
                 self._load_job_log(job, pipeline)
-            elif panel._view_level == 1 and pipeline is not None:
+            elif panel.view_level == 1 and pipeline is not None:
                 self._load_pipeline_jobs(pipeline)
             else:
                 self._on_tab_switch("pipeline")
