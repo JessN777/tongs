@@ -590,10 +590,14 @@ class DiffOptionList(TintedOptionList):
 
     def action_toggle_discussion(self) -> None:
         """Expand or collapse discussion threads on the current line."""
-        if self.highlighted is None or self._refuse_read_only():
+        if self.highlighted is None:
             return
         discussions = self._comment_map.get(self.highlighted)
         if not discussions:
+            # A read-only row without a thread explains itself; one with a
+            # thread, such as an expanded line carrying an outdated thread,
+            # can still show and hide it.
+            self._refuse_read_only()
             return
         disc_ids = {d.id for d in discussions}
         if disc_ids & self._expanded_threads:
@@ -1435,11 +1439,27 @@ class DiffContent(Widget):
                 option_idx += 1
                 continue
             if isinstance(segment, ExpandedBlock):
+                # A thread can point at a line outside the current hunks, for
+                # example one left on an earlier revision: it is drawn under
+                # its expanded line like a hunk line's thread, while the line
+                # itself stays read-only and never becomes a comment anchor.
                 for dl in segment.lines:
                     all_options.append(Option(renderer._render_line(dl)))
                     option_list._readonly_rows[option_idx] = dl
                     option_list._line_types[option_idx] = dl.line_type
+                    line_discs = _match_discussions(dl, disc_index)
+                    if line_discs:
+                        option_list._comment_map[option_idx] = line_discs
+                        option_list._comment_indices.append(option_idx)
                     option_idx += 1
+                    expanded_discs = [d for d in line_discs if d.id in expanded]
+                    for block_line in _render_thread_block(
+                        expanded_discs,
+                        ascii_mode=ascii_mode,
+                        code_theme=self._syntax_theme,
+                    ):
+                        all_options.append(Option(block_line, disabled=True))
+                        option_idx += 1
                 continue
             hunk = segment.hunk
             header_text = Text(f"  {hunk.header}", style=Style(bold=True, dim=True))
@@ -1870,9 +1890,7 @@ class DiffRenderer:
         new = f"{dl.new_lineno:>4}" if dl.new_lineno is not None else "    "
         gutter = Text(f"{old} {new} ", style=Style(dim=True))
         key = (dl.old_lineno, dl.new_lineno)
-        # A thread on a line outside the hunks cannot be opened from the
-        # diff, so an expanded line never shows a thread marker.
-        if dl.line_type is not LineType.EXPANDED and key in self._comment_lines:
+        if key in self._comment_lines:
             all_resolved = self._comment_lines[key]
             if all_resolved:
                 gutter.append("* ", Style(dim=True))
