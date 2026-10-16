@@ -314,6 +314,74 @@ async def test_an_expanded_line_with_a_thread_shows_and_opens_it() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_new_side_only_thread_marks_the_new_column_only() -> None:
+    app = _SplitApp()
+    async with app.run_test(size=(200, 60), notifications=True) as pilot:
+        file = _file()
+        # A thread anchored to the new side only, as GitLab leaves on a line
+        # a later revision turns back into context.
+        thread = InlineComment("c1", User("bob"), "Old note", NOW, "f.txt", None, 2)
+        discussions = [Discussion("d1", True, thread)]
+        panel = app.query_one(DiffPanel)
+        panel.set_files([file], discussions)
+        panel.request_mode(DiffViewMode.SPLIT)
+        await pilot.pause()
+        old, new = _columns(app)
+        new.focus()
+        await pilot.pause()
+
+        await _press_e_on_gap(app, pilot, new, 0)
+        panel.apply_file_context(file, NEW_LINES, NEW_EOL, 0)
+        await pilot.pause()
+        new.focus()
+        await pilot.pause()
+
+        assert "    2 *  line 2" in _rows(new)
+        assert "    2    line 2" in _rows(old)
+
+        # ] stops on the expanded line, and d opens the thread in the new
+        # column only.
+        await pilot.press("]")
+        await pilot.pause()
+        landed = new._readonly_rows[new.highlighted]
+        assert (landed.old_lineno, landed.new_lineno) == (2, 2)
+        await pilot.press("d")
+        await pilot.pause()
+        assert any("Old note" in row for row in _rows(new))
+        assert not any("Old note" in row for row in _rows(old))
+
+
+@pytest.mark.asyncio
+async def test_a_new_side_only_thread_keeps_its_context_line_out_of_a_fold() -> None:
+    app = _SplitApp()
+    async with app.run_test(size=(200, 60)) as pilot:
+        # Line 14 sits inside the wide hunk's eight-line fold. A thread
+        # anchored to its new side only must keep the line on screen, marker
+        # and all, instead of letting the fold hide the thread away.
+        thread = InlineComment("c1", User("bob"), "Old note", NOW, "f.txt", None, 14)
+        panel = app.query_one(DiffPanel)
+        panel.set_files([_file(WIDE_CONTEXT)], [Discussion("d1", True, thread)])
+        option_list = app.query_one(DiffOptionList)
+        option_list.focus()
+        await pilot.pause()
+
+        rows = [
+            option_list.get_option_at_index(index).prompt.plain
+            for index in range(option_list.option_count)
+        ]
+        assert "  14   14 *  line 14" in rows
+        # The fold that hid line 14 splits around it: the kept line keeps
+        # its context lines beside it and the rest stays folded.
+        assert "  15   15    line 15" in rows
+        folds = [
+            gap.length
+            for gap in option_list._gap_rows.values()
+            if gap.position is GapPosition.INSIDE
+        ]
+        assert folds == [2, 4, 2]
+
+
+@pytest.mark.asyncio
 async def test_a_split_range_across_a_gap_is_refused() -> None:
     app = _SplitApp()
     async with app.run_test(size=(200, 60), notifications=True) as pilot:
