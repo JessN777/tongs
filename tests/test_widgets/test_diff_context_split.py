@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from textual.app import App, ComposeResult
 
@@ -9,6 +11,7 @@ from tests.test_diff.test_context import FIXTURES
 from tongs.diff.context import GapPosition
 from tongs.diff.models import DiffFile, LineType
 from tongs.diff.parser import parse_diff
+from tongs.forges.models import Discussion, InlineComment, User
 from tongs.state.drafts import DiffSide
 from tongs.widgets.diff_panel import (
     FOLD_READ_ONLY_MESSAGE,
@@ -49,6 +52,8 @@ def _split_text(text: str) -> tuple[tuple[str, ...], bool]:
 
 NEW_LINES, NEW_EOL = _split_text(FIXTURES["two_hunks"][1])
 OLD_LINES, _ = _split_text(FIXTURES["two_hunks"][0])
+
+NOW = datetime(2026, 10, 10, tzinfo=UTC)
 
 
 def _file(hunks: str | None = None, path: str = "f.txt") -> DiffFile:
@@ -255,6 +260,56 @@ async def test_comment_keys_on_gap_rows_and_expanded_cells_are_refused(
             await pilot.pause()
 
         assert _messages(app).count(READ_ONLY_LINE_MESSAGE) == 3
+        assert app.comments == []
+
+
+@pytest.mark.asyncio
+async def test_an_expanded_line_with_a_thread_shows_and_opens_it() -> None:
+    app = _SplitApp()
+    async with app.run_test(size=(200, 60), notifications=True) as pilot:
+        file = _file()
+        # An outdated thread on line 2, which is unchanged now.
+        outdated = InlineComment("c1", User("bob"), "Old note", NOW, "f.txt", 2, 2)
+        discussions = [Discussion("d1", True, outdated)]
+        panel = app.query_one(DiffPanel)
+        panel.set_files([file], discussions)
+        panel.request_mode(DiffViewMode.SPLIT)
+        await pilot.pause()
+        old, new = _columns(app)
+        new.focus()
+        await pilot.pause()
+
+        await _press_e_on_gap(app, pilot, new, 0)
+        panel.apply_file_context(file, NEW_LINES, NEW_EOL, 0)
+        await pilot.pause()
+        new.focus()
+        await pilot.pause()
+
+        assert "    2 *  line 2" in _rows(new)
+        assert "    2 *  line 2" in _rows(old)
+
+        # ] stops on the expanded line, in step across both columns.
+        await pilot.press("]")
+        await pilot.pause()
+        landed = new._readonly_rows[new.highlighted]
+        assert (landed.old_lineno, landed.new_lineno) == (2, 2)
+        assert old.highlighted == new.highlighted
+
+        # d shows the thread in the new column only, hides it again, and keeps
+        # the cursor on the expanded line instead of the first change.
+        await pilot.press("d")
+        await pilot.pause()
+        assert any("Old note" in row for row in _rows(new))
+        assert not any("Old note" in row for row in _rows(old))
+        await pilot.press("d")
+        await pilot.pause()
+        assert not any("Old note" in row for row in _rows(new))
+        assert new._readonly_rows[new.highlighted].new_lineno == 2
+
+        # The line still refuses a new comment.
+        await pilot.press("c")
+        await pilot.pause()
+        assert READ_ONLY_LINE_MESSAGE in _messages(app)
         assert app.comments == []
 
 
