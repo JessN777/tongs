@@ -2484,24 +2484,41 @@ function DiffRowView({
   if (row.kind === "split") return null;
   if (row.kind === "gap") return <GapRowView row={row} extras={extras} />;
   if (row.kind === "hide") return <HideRowView row={row} extras={extras} />;
-  if (row.kind === "context")
+  if (row.kind === "context") {
+    // An expanded line is read-only, but a thread can still point at it, for
+    // example one left on an earlier revision: it is drawn under the line the
+    // same way a hunk line's thread is.
+    const anchoredThreads = threadsOnUnifiedRow(threads, file, row);
     return (
-      <div
-        className="diff-line line-context line-expanded"
-        role="listitem"
-        data-expanded="true"
-      >
-        <span className="line-number">{row.old_line}</span>
-        <span className="line-number">{row.new_line}</span>
-        <ExpandedLineBody
-          row={row}
-          line={row.new_line}
-          side="new"
-          syntax={contextSyntax(row)}
-          refuse={extras.refuse}
-        />
-      </div>
+      <>
+        <div
+          className="diff-line line-context line-expanded"
+          role="listitem"
+          data-expanded="true"
+        >
+          <span className="line-number">{row.old_line}</span>
+          <span className="line-number">{row.new_line}</span>
+          <ExpandedLineBody
+            row={row}
+            line={row.new_line}
+            side="new"
+            syntax={contextSyntax(row)}
+            refuse={extras.refuse}
+          />
+        </div>
+        {anchoredThreads.map((thread) => (
+          <div
+            className={threadRowClassName(threads, thread)}
+            role="listitem"
+            key={thread.discussion.id}
+            {...{ [REVIEW_ROW_ATTRIBUTE]: threadRowKey(thread.discussion.id) }}
+          >
+            <DiffThread thread={thread} slot={threads} />
+          </div>
+        ))}
+      </>
     );
+  }
   // A diff generated locally has no forge diff to anchor a comment to.
   const selectable =
     row.line_type !== "no_newline" && file !== null && !extras.readOnly;
@@ -2776,14 +2793,18 @@ function ThreadFileCount({
 }
 
 /**
- * The published threads that belong under one unified row. A unified row can
- * carry both sides of the diff, so both sides are read, new side first, which
- * is the order the file's own columns are in.
+ * The published threads that belong under one unified row, hunk line or
+ * expanded context line alike. A unified row can carry both sides of the
+ * diff, so both sides are read, new side first, which is the order the
+ * file's own columns are in.
  */
 function threadsOnUnifiedRow(
   threads: DiscussionThreadSlot,
   file: DiffFileRow | null,
-  row: Extract<DiffRow, { readonly kind: "line" }>,
+  row: {
+    readonly old_line: number | null;
+    readonly new_line: number | null;
+  },
 ): readonly AnchoredThread[] {
   if (!file) return EMPTY_THREADS;
   const onNew = threadsOnLine(threads, file.new_path, "new", row.new_line);

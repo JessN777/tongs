@@ -969,6 +969,68 @@ test("a discussion on a line only a gap holds never resolves to an anchor", () =
   assert.equal(at("new", 6)?.contextComplete, true);
 });
 
+test("a thread on an expanded line is drawn under it, as under a hunk line", async () => {
+  const review = "review-expanded-thread";
+  // One published thread on new line 10, which only the middle gap holds: an
+  // unchanged line now, commented on an earlier revision.
+  const discussion = {
+    id: "d1",
+    is_inline: true,
+    is_resolved: false,
+    resolvable: true,
+    root_comment: {
+      id: "d1-root",
+      author: { username: "bob", display_name: "" },
+      body: "Left on an earlier revision",
+      created_at: "2026-09-09T00:00:00Z",
+      file_path: "src/file_0.py",
+      old_line: null,
+      new_line: 10,
+      is_resolved: false,
+      replies: [],
+    },
+  };
+  const bridge = diffBridge(review, (layout) => expandableRows(layout), {
+    listDiscussions: () =>
+      settledRead({
+        snapshot_id: "discussions-snapshot",
+        resource: review,
+        revision: { discussion_count: 1 },
+        cursor: 0,
+        next_cursor: null,
+        discussions: [discussion],
+      }),
+  });
+  const view = renderDiff(review, bridge);
+  // Wait for the discussions to arrive, so the next check is not vacuous.
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(".file-threads").length, 1),
+  );
+  await waitFor(() => assert.equal(gapTexts(view).length, 3));
+  // The gap row still hides the thread: the line it points at is not drawn.
+  assert.equal(view.container.querySelectorAll(".diff-thread").length, 0);
+
+  clickText(view, ".diff-gap-button", "3 unchanged lines");
+  await view.findByLabelText("Discussion thread on new line 10");
+  assert.equal(view.container.querySelectorAll(".diff-thread").length, 1);
+  // The thread row sits directly under its expanded line, in file order.
+  assert.deepEqual(
+    [
+      ...view.container.querySelectorAll(
+        ".diff-unified .line-expanded, .diff-unified .thread-row",
+      ),
+    ].map((node) => (node.classList.contains("thread-row") ? "thread" : "line")),
+    ["line", "line", "thread", "line"],
+  );
+  // The thread row carries the review-row key n and p navigate by.
+  assert.equal(
+    view.container
+      .querySelector(".diff-unified .thread-row")
+      .getAttribute("data-review-row"),
+    "thread:d1",
+  );
+});
+
 // ---------------------------------------------------------------- split
 
 test("split view expands a gap into both panes with each side's numbers", async () => {

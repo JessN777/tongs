@@ -494,10 +494,12 @@ class SplitDiffColumn(TintedOptionList):
         self.post_message(DiffSelectionChanged(self.selection))
 
     def action_toggle_discussion(self) -> None:
-        if self._refuse_read_only():
-            return
         discussions = self._current_discussions()
         if not discussions:
+            # A read-only row without a thread explains itself; one with a
+            # thread, such as an expanded line carrying an outdated thread,
+            # can still show and hide it.
+            self._refuse_read_only()
             return
         ids = frozenset(discussion.id for discussion in discussions)
         if ids & self._expanded_threads:
@@ -912,9 +914,14 @@ class SplitDiffView(Widget):
     def on__split_thread_toggled(self, event: _SplitThreadToggled) -> None:
         event.stop()
         selection = self.selection
+        # A toggle from an expanded line has no selection to restore, so the
+        # cursor is put back on that line instead of on the first change.
+        cursor_mark = self._cursor_mark()
         self._populate()
         if selection is not None:
             self.restore_selection(selection)
+        elif cursor_mark is not None:
+            self._restore_cursor_mark(cursor_mark)
 
     def _populate(self) -> None:
         file = self._file
@@ -991,13 +998,41 @@ class SplitDiffView(Widget):
                     option_index += 1
                     continue
                 if isinstance(segment, ExpandedBlock):
+                    # A thread can point at a line outside the current hunks,
+                    # for example one left on an earlier revision: it is drawn
+                    # under its expanded row like a hunk row's thread, while
+                    # the line itself stays read-only and never becomes a
+                    # comment anchor.
                     for line in segment.lines:
-                        old_options.append(self._cell_option(line, DiffSide.OLD, []))
-                        new_options.append(self._cell_option(line, DiffSide.NEW, []))
-                        for column in (old_column, new_column):
+                        old_discussions = _line_discussions(
+                            line, DiffSide.OLD, self._discussion_index
+                        )
+                        new_discussions = _line_discussions(
+                            line, DiffSide.NEW, self._discussion_index
+                        )
+                        old_options.append(
+                            self._cell_option(line, DiffSide.OLD, old_discussions)
+                        )
+                        new_options.append(
+                            self._cell_option(line, DiffSide.NEW, new_discussions)
+                        )
+                        for column, cell_discussions in (
+                            (old_column, old_discussions),
+                            (new_column, new_discussions),
+                        ):
                             column._readonly_rows[option_index] = line
                             column._line_types[option_index] = line.line_type
+                            if cell_discussions:
+                                column._comment_map[option_index] = cell_discussions
+                                column._comment_indices.append(option_index)
                         option_index += 1
+                        option_index = self._thread_rows(
+                            old_options,
+                            new_options,
+                            option_index,
+                            old_discussions,
+                            new_discussions,
+                        )
                     continue
                 hunk = segment.hunk
                 header = _single_line(f" {hunk.header}", Style(bold=True, dim=True))
@@ -1068,12 +1103,6 @@ class SplitDiffView(Widget):
         new_discussions = _line_discussions(
             row.new, DiffSide.NEW, self._discussion_index
         )
-        row_discussions = list(
-            {
-                discussion.id: discussion
-                for discussion in [*old_discussions, *new_discussions]
-            }.values()
-        )
         old_options.append(self._cell_option(row.old, DiffSide.OLD, old_discussions))
         new_options.append(self._cell_option(row.new, DiffSide.NEW, new_discussions))
         for side, column, line, cell_discussions in (
@@ -1092,18 +1121,9 @@ class SplitDiffView(Widget):
                     first_changed[side] = option_index
         option_index += 1
 
-        expanded = [
-            discussion
-            for discussion in row_discussions
-            if discussion.id in self._expanded_threads
-        ]
-        config = app_config(self.app)
-        for thread_line in _thread_lines(
-            expanded, ascii_mode=config.ascii_mode, code_theme=config.syntax_theme
-        ):
-            old_options.append(Option(_single_line(""), disabled=True))
-            new_options.append(Option(thread_line, disabled=True))
-            option_index += 1
+        option_index = self._thread_rows(
+            old_options, new_options, option_index, old_discussions, new_discussions
+        )
 
         for marker in self._markers_for_row(file, row.old, row.new):
             for marker_line in _draft_marker_lines(marker):
@@ -1114,6 +1134,33 @@ class SplitDiffView(Widget):
                     old_options.append(Option(_single_line(""), disabled=True))
                     new_options.append(Option(marker_line, disabled=True))
                 option_index += 1
+        return option_index
+
+    def _thread_rows(
+        self,
+        old_options: list[Option],
+        new_options: list[Option],
+        option_index: int,
+        *cell_discussions: list[Discussion],
+    ) -> int:
+        """Append a row's open thread lines, blank in the old column."""
+        row_discussions = {
+            discussion.id: discussion
+            for discussions in cell_discussions
+            for discussion in discussions
+        }
+        expanded = [
+            discussion
+            for discussion in row_discussions.values()
+            if discussion.id in self._expanded_threads
+        ]
+        config = app_config(self.app)
+        for thread_line in _thread_lines(
+            expanded, ascii_mode=config.ascii_mode, code_theme=config.syntax_theme
+        ):
+            old_options.append(Option(_single_line(""), disabled=True))
+            new_options.append(Option(thread_line, disabled=True))
+            option_index += 1
         return option_index
 
     def _markers_for_row(

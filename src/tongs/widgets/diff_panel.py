@@ -590,10 +590,14 @@ class DiffOptionList(TintedOptionList):
 
     def action_toggle_discussion(self) -> None:
         """Expand or collapse discussion threads on the current line."""
-        if self.highlighted is None or self._refuse_read_only():
+        if self.highlighted is None:
             return
         discussions = self._comment_map.get(self.highlighted)
         if not discussions:
+            # A read-only row without a thread explains itself; one with a
+            # thread, such as an expanded line carrying an outdated thread,
+            # can still show and hide it.
+            self._refuse_read_only()
             return
         disc_ids = {d.id for d in discussions}
         if disc_ids & self._expanded_threads:
@@ -1435,11 +1439,27 @@ class DiffContent(Widget):
                 option_idx += 1
                 continue
             if isinstance(segment, ExpandedBlock):
+                # A thread can point at a line outside the current hunks, for
+                # example one left on an earlier revision: it is drawn under
+                # its expanded line like a hunk line's thread, while the line
+                # itself stays read-only and never becomes a comment anchor.
                 for dl in segment.lines:
                     all_options.append(Option(renderer._render_line(dl)))
                     option_list._readonly_rows[option_idx] = dl
                     option_list._line_types[option_idx] = dl.line_type
+                    line_discs = _match_discussions(dl, disc_index)
+                    if line_discs:
+                        option_list._comment_map[option_idx] = line_discs
+                        option_list._comment_indices.append(option_idx)
                     option_idx += 1
+                    expanded_discs = [d for d in line_discs if d.id in expanded]
+                    for block_line in _render_thread_block(
+                        expanded_discs,
+                        ascii_mode=ascii_mode,
+                        code_theme=self._syntax_theme,
+                    ):
+                        all_options.append(Option(block_line, disabled=True))
+                        option_idx += 1
                 continue
             hunk = segment.hunk
             header_text = Text(f"  {hunk.header}", style=Style(bold=True, dim=True))
@@ -1748,7 +1768,7 @@ class DiffRenderer:
             key = (dl.old_lineno, dl.new_lineno)
             if (
                 dl.line_type == LineType.CONTEXT
-                and key not in self._comment_lines
+                and _comment_state(self._comment_lines, dl) is None
                 and key not in self._protected_lines
                 and not (revealed is not None and revealed(dl))
             ):
@@ -1869,11 +1889,11 @@ class DiffRenderer:
         old = f"{dl.old_lineno:>4}" if dl.old_lineno is not None else "    "
         new = f"{dl.new_lineno:>4}" if dl.new_lineno is not None else "    "
         gutter = Text(f"{old} {new} ", style=Style(dim=True))
-        key = (dl.old_lineno, dl.new_lineno)
-        # A thread on a line outside the hunks cannot be opened from the
-        # diff, so an expanded line never shows a thread marker.
-        if dl.line_type is not LineType.EXPANDED and key in self._comment_lines:
-            all_resolved = self._comment_lines[key]
+        # The marker resolves a line's threads through the same side
+        # fallbacks the thread list below the line uses, so the two can not
+        # disagree about whether a thread sits there.
+        all_resolved = _comment_state(self._comment_lines, dl)
+        if all_resolved is not None:
             if all_resolved:
                 gutter.append("* ", Style(dim=True))
             else:
@@ -2225,18 +2245,44 @@ def _build_comment_lines(
     return {k: all(v) for k, v in lines.items()}
 
 
+def _anchor_candidates(
+    dl: DiffLine,
+) -> tuple[tuple[int | None, int | None], ...]:
+    """The anchor keys a diff line matches: its exact key, then side fallbacks.
+
+    A thread can be anchored to one side of a line only, as GitLab does for
+    a comment on the new side of a change. When a later revision leaves that
+    line unchanged, the line carries both numbers and only a side fallback
+    still finds the thread.
+    """
+    keys = [(dl.old_lineno, dl.new_lineno)]
+    if dl.new_lineno is not None:
+        keys.append((None, dl.new_lineno))
+    if dl.old_lineno is not None:
+        keys.append((dl.old_lineno, None))
+    return tuple(keys)
+
+
+def _comment_state(
+    comment_lines: dict[tuple[int | None, int | None], bool], dl: DiffLine
+) -> bool | None:
+    """Whether every thread matching a line is resolved; None if it has none."""
+    for key in _anchor_candidates(dl):
+        if key in comment_lines:
+            return comment_lines[key]
+    return None
+
+
 def _match_discussions(
     dl: DiffLine,
     index: dict[tuple[int | None, int | None], list[Discussion]],
 ) -> list[Discussion]:
     """Find discussions matching a DiffLine by line numbers."""
-    key = (dl.old_lineno, dl.new_lineno)
-    result = index.get(key, [])
-    if not result and dl.new_lineno is not None:
-        result = index.get((None, dl.new_lineno), [])
-    if not result and dl.old_lineno is not None:
-        result = index.get((dl.old_lineno, None), [])
-    return result
+    for key in _anchor_candidates(dl):
+        discussions = index.get(key)
+        if discussions:
+            return discussions
+    return []
 
 
 def _render_draft_marker(marker: DraftMarker) -> Text:

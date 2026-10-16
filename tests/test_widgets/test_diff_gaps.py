@@ -445,7 +445,7 @@ async def test_e_away_from_a_gap_row_in_split_view_explains_where_to_go() -> Non
 
 
 @pytest.mark.asyncio
-async def test_an_expanded_line_never_shows_a_thread_marker() -> None:
+async def test_an_expanded_line_with_a_thread_shows_and_opens_it() -> None:
     app = _GapApp()
     async with app.run_test(size=(100, 60), notifications=True) as pilot:
         file = _file()
@@ -464,10 +464,61 @@ async def test_an_expanded_line_never_shows_a_thread_marker() -> None:
         await pilot.pause()
 
         rows = _rows(app)
-        assert "   2    2    line 2" in rows
-        assert not any(row.startswith("   2    2 *") for row in rows)
+        assert "   2    2 *  line 2" in rows
         # A hunk line keeps its marker.
         assert "   8    8 *  line 8" in rows
+
+        # ] stops on the expanded line, and d shows the thread under it.
+        option_list = _option_list(app)
+        option_list.highlighted = 0
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        line = option_list._readonly_rows[option_list.highlighted]
+        assert (line.old_lineno, line.new_lineno) == (2, 2)
+
+        await pilot.press("d")
+        await pilot.pause()
+        assert any("Old note" in row for row in _rows(app))
+
+        # d hides the thread again, and the line still refuses a new comment.
+        await pilot.press("d")
+        await pilot.pause()
+        assert not any("Old note" in row for row in _rows(app))
+        await pilot.press("c")
+        await pilot.pause()
+        assert READ_ONLY_LINE_MESSAGE in _messages(app)
+        assert app.comments == []
+
+
+@pytest.mark.asyncio
+async def test_a_new_side_only_thread_on_an_expanded_line_shows_its_marker() -> None:
+    app = _GapApp()
+    async with app.run_test(size=(100, 60), notifications=True) as pilot:
+        file = _file()
+        # GitLab anchors a thread left on a changed line by its new side
+        # only. A later revision can leave that line unchanged and outside
+        # every hunk, so the expanded line carries both numbers and only the
+        # new-side fallback still finds the thread.
+        thread = InlineComment("c1", User("bob"), "Old note", NOW, "f.txt", None, 2)
+        discussions = [Discussion("d1", True, thread)]
+        panel = await _open(app, pilot, file, discussions=discussions)
+
+        await _press_e_on_gap(app, pilot, 0)
+        panel.apply_file_context(file, NEW_LINES, NEW_EOL, 0)
+        await pilot.pause()
+
+        assert "   2    2 *  line 2" in _rows(app)
+
+        option_list = _option_list(app)
+        option_list.highlighted = 0
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        line = option_list._readonly_rows[option_list.highlighted]
+        assert (line.old_lineno, line.new_lineno) == (2, 2)
+
+        await pilot.press("d")
+        await pilot.pause()
+        assert any("Old note" in row for row in _rows(app))
 
 
 @pytest.mark.asyncio
