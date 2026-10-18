@@ -243,9 +243,9 @@ async def test_github_reviews_and_my_mrs_show_real_ci_with_pinned_requests(
         ci = {"graphql": 1} if graphql else {"check-runs": 4, "status": 4}
         assert forge.counts() == Counter({"search": 1, "pull": 4, **ci})
         assert forge.searches == [
-            "is:pr is:open review-requested:@me",
-            "is:pr is:open author:@me",
-            "is:pr is:open author:@me",
+            "is:pr is:open review-requested:@me archived:false",
+            "is:pr is:open author:@me archived:false",
+            "is:pr is:open author:@me archived:false",
         ]
     await http.aclose()
 
