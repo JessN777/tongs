@@ -299,7 +299,12 @@ class GitLabClient(ForgeClient):
             self._http,
             "/merge_requests",
             per_page=100,
-            params={"scope": "all", "reviewer_username": username, "state": "opened"},
+            params={
+                "scope": "all",
+                "reviewer_username": username,
+                "state": "opened",
+                "non_archived": "true",
+            },
         )
         results = []
         for mr in data:
@@ -312,7 +317,11 @@ class GitLabClient(ForgeClient):
             self._http,
             "/merge_requests",
             per_page=100,
-            params={"scope": "created_by_me", "state": "opened"},
+            params={
+                "scope": "created_by_me",
+                "state": "opened",
+                "non_archived": "true",
+            },
         )
         results = []
         for mr in data:

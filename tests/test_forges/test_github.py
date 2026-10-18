@@ -1265,6 +1265,36 @@ class TestSearchPaging:
         assert search_pages == ["1"]
 
 
+class TestArchivedFilter:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("method", "expected"),
+        [
+            ("list_my_reviews", "is:pr is:open review-requested:@me archived:false"),
+            ("list_my_mrs", "is:pr is:open author:@me archived:false"),
+        ],
+    )
+    async def test_inbox_searches_exclude_archived_repositories(
+        self, method: str, expected: str
+    ) -> None:
+        queries = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/search/issues":
+                queries.append(request.url.params["q"])
+                return httpx.Response(
+                    200,
+                    json={"total_count": 0, "incomplete_results": False, "items": []},
+                )
+            return httpx.Response(200, json=_pr_api_json())
+
+        client, http = _make_github_client(handler)
+        async with http:
+            await getattr(client, method)()
+
+        assert queries == [expected]
+
+
 class TestMergedState:
     @pytest.mark.asyncio
     async def test_listed_pull_with_merged_at_reads_as_merged(self) -> None:
