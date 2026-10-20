@@ -269,8 +269,7 @@ The two methods are independent. The per-user commands never install RPM package
 
 ## Keybindings
 
-The keybindings below describe the terminal TUI. The beta desktop
-workspace uses labelled controls and does not change these terminal commands.
+The keybindings below describe the terminal TUI. The desktop app has its own review keys; see the [keybinding reference](https://www.tongs.tools/reference/keybindings/#desktop-app-beta).
 
 ### Global
 
@@ -280,7 +279,6 @@ workspace uses labelled controls and does not change these terminal commands.
 | `?` | Help |
 | `q` | Quit / Back |
 | `Ctrl+R` | Refresh current view |
-| `o` | Open in browser |
 
 ### Inbox
 
@@ -293,6 +291,7 @@ workspace uses labelled controls and does not change these terminal commands.
 | `s` | Cycle sort order |
 | `r` | Repo list / Back |
 | `Enter` | Open MR detail |
+| `o` | Open the current item in the browser |
 
 ### Repo list
 
@@ -317,6 +316,8 @@ workspace uses labelled controls and does not change these terminal commands.
 | `Ctrl+G` | Start review mode, or open the review draft screen once a draft exists |
 | `Ctrl+N` | Cycle to the next recovered review draft for this MR |
 
+`o` opens the current MR in the browser. It is not bound on the repository list. The Pipeline tab binds `o` separately, below.
+
 ### Diff viewer
 
 | Key | Action |
@@ -333,6 +334,8 @@ workspace uses labelled controls and does not change these terminal commands.
 | `n` / `Shift+N` | Next / previous file |
 | `m` | Toggle Markdown preview |
 | `v` | Toggle unified/split diff mode |
+| `e` | Expand the unchanged lines behind the gap row under the cursor, or collapse the expanded lines under the cursor and fold again the lines a fold showed |
+| `F` | Show the whole file, or go back to what you had expanded |
 | `Escape` | Clear selection |
 
 In split diff mode, `h` and `l` move focus between the old and new side columns.
@@ -377,14 +380,13 @@ See the [full keybinding reference](https://www.tongs.tools/reference/keybinding
 |-----|--------|
 | `j` / `k` | Move between pipeline / job cards |
 | `Enter` | Drill into jobs (from pipeline) or log (from job) |
-| `Escape` | Drill out one level |
 | `C` | Cancel pipeline or job (press twice) |
 | `R` | Retry pipeline or job (press twice) |
 | `o` | Open pipeline / job in browser |
 | `F2` | Open job log in external editor |
 | `/` | Search job log text (live, with match count) |
 | `n` / `N` | Jump to next / previous match (wraps) |
-| `Escape` | Close the log search, then drill out one level |
+| `Escape` | Close the log search, or step back one level |
 
 ## Configuration
 
